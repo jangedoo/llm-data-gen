@@ -1,6 +1,9 @@
+import logging
 from pathlib import Path
 
 import click
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s:%(levelname)s:%(message)s")
 
 
 @click.group()
@@ -14,16 +17,12 @@ def cli():
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
     required=True,
 )
-def generate_raw_dataset(config_file: Path):
-    import tomllib
+def generate(config_file: Path):
+    from nep_qa_dataset.pipeline import GenerationPipeline, GenerationPipelineConfig
 
-    config = tomllib.load(config_file.open("rb"))
-    click.echo(config)
-
-
-@cli.command()
-def generate_curated_dataset():
-    click.echo(f"Generating curated dataset")
+    pipeline_config = GenerationPipelineConfig.from_path(config_file)
+    pipeline = GenerationPipeline(config=pipeline_config)
+    pipeline.start()
 
 
 if __name__ == "__main__":
