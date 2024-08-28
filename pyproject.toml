@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "nep-qa-dataset"
+version = "0.1.0"
+description = ""
+authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
+readme = "README.md"
+packages = [{include = "nep_qa_dataset"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+datasets = "^2.21.0"
+pandas = "^2.2.2"
+click = "^8.1.7"
+openai = "^1.42.0"
+python-dotenv = "^1.0.1"
+
+
+[tool.poetry.group.dev.dependencies]
+jupyter = "^1.0.0"
+rope = "^1.13.0"
+black = "^24.8.0"
+flake8 = "^7.1.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
