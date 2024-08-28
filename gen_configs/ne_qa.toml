@@ -1,0 +1,102 @@
+dataset_name = "Nepali Extractive Question Answering Dataset (NEQAD)"
+description = "Nepali Q&A Dataset"
+authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
+
+# where to store the raw files
+generation_output_dir = "../raw_data/nep_qa/json/"
+
+# log will be printed every N steps when saving the extracted data
+generation_logging_steps = 100
+
+# 1. define sources
+[sources.nepali_health_fact]
+path = "NepaliAI/Nepali-Health-Fact"
+split = "train"
+
+[sources.nepali_text_corpus_64]
+path = "mridul3301/nepali-text-corpus-64"
+split = "train"
+
+[sources.nepali_wikipedia]
+path = "wikimedia/wikipedia"
+subset = "20231101.ne"
+split = "train"
+
+
+# 2. define model
+[models.dummy]
+backend = "dummy"
+[models.dummy.params]
+response = '```[{"q": "this is a question", "a": "this is an answer"}]```'
+
+[models.llama31]
+backend = "llama_cpp"
+params = { repo_id = "bartowski/Meta-Llama-3.1-8B-Instruct-GGUF", file_name = "Meta-Llama-3.1-8B-Instruct-Q6_K_L.gguf" }
+
+
+[models.openai-gpt-4o-mini]
+backend = "openai"
+[models.openai-gpt-4o-mini.params]
+model = "gpt-4o-mini"
+temperature = 0.3
+max_tokens = 1000
+top_p = 1
+frequency_penalty = 0
+presence_penalty = 0
+
+
+# 3. define generator
+[generator]
+module = "datagen.QuestionAnswerGenerator"
+
+[generator.params]
+# this generator will use the following model for all dataset unless specified
+default_model = "openai-gpt-4o-mini"
+# default_model = "dummy"
+
+# this generator will use the following datasets
+source_datasets = [
+    { name = "nepali_health_fact", passage_column = "Answer", max_records = 100, shuffle = true },
+    { name = "nepali_text_corpus_64", passage_column = "Article", max_records = 100, shuffle = true },
+    { name = "nepali_wikipedia", passage_column = "text", max_records = 100, shuffle = true },
+]
+
+default_system_prompt = """\
+Given the provided passage in Nepali, identify and extract potential "Wh-questions" and their corresponding answers.
+You can choose to focus on one or more of these aspects when formulating a question
+
+- Who is involved or mentioned?
+- What key events or concepts are described?
+- Where do these events take place?
+- When do these events occur?
+- Why do these events happen?
+- How do these events unfold or are carried out?
+
+Ensure that each question is formulated to elicit a specific, concise answer, using only a few words drawn directly from the text. It is important that the answer should be present as-is in the passage.
+Your output will be used to train an extractive question answering model, emphasizing the accuracy and relevance of each question-answer pair.
+
+Below is an example of how the input looks like and how you should respond.
+
+Input: 
+भारतमा अन्तिम चरणमा पुगेको चुनावको नतिजाप्रति चासो बढिरहेको छ। त्यसप्रतिको चासो नेपालमा पनि पाइन्छ। खासगरी केही वर्षअघिको नाकाबन्दीका कारण पनि त्यहाँ कस्को सरकार बन्ला र नेपालसँग उसको कस्तो सम्बन्ध रहला भन्ने कुराले त्यो चासो बढाएको हो।
+
+Output:
+```
+[
+ {"q": "कस्को सरकार बन्न सक्छ?", "a": "भारतको"},
+ {"q": "भारतमा कुन चरणमा पुगेको चुनावको नतिजाप्रति चासो बढिरहेको छ?", "a": "अन्तिम"}
+]
+```
+"""
+
+# 4. define curator
+# curator will take the valid raw files and create a Dataset that can be uploaded to HuggingFace
+[curator.params]
+upload_to_hf = true
+upload_repo_id = "jangedoo/nep_qa_test"
+update_card = true
+language = ['ne']
+license = 'mit'
+task_categories = ['question-answering']
+task_ids = ['document-question-answering']
+citation_bibtex = ""
