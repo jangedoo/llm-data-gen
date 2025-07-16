@@ -1,7 +1,7 @@
 import openai
 from pydantic import BaseModel
 
-from nep_qa_dataset.llm.base import LLM
+from datagen.llm.base import LLM
 
 
 class OpenAILLM(LLM):

@@ -1,7 +1,12 @@
 from pydantic import BaseModel
 from litellm import responses, ResponseTextConfigParam, ResponsesAPIResponse
 import litellm
-from nep_qa_dataset.llm.base import LLM
+from datagen.llm.base import LLM
+import logging
+
+logging.getLogger("LiteLLM").setLevel(logging.CRITICAL)
+logging.getLogger("httpx").setLevel(logging.CRITICAL)
+logging.getLogger("httpcore").setLevel(logging.CRITICAL)
 
 # https://docs.litellm.ai/docs/completion/json_mode#validate-json-schema
 litellm.enable_json_schema_validation = True
@@ -23,6 +28,7 @@ class LiteLLM(LLM):
         self.top_p = top_p
         self.frequency_penalty = frequency_penalty
         self.presence_penalty = presence_penalty
+        self.usage_history: list = []
 
     def generate(
         self,
@@ -54,9 +60,30 @@ class LiteLLM(LLM):
             presence_penalty=self.presence_penalty,
             text=response_text_config,
         )  # type: ignore
+
+        self.usage_history.append(response.usage)
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
             return response_format.model_validate_json(
                 response.output[0].content[0].text
             )
         else:
             return response.output[0].content[0].text
+
+    def get_usage_stats(self) -> dict:
+        completion_tokens = 0
+        prompt_tokens = 0
+        total_tokens = 0
+        num_usage = len(self.usage_history)
+        for usage in self.usage_history:
+            if usage is None:
+                continue
+            completion_tokens += getattr(usage, "output_tokens", 0)
+            prompt_tokens += getattr(usage, "input_tokens", 0)
+            total_tokens += getattr(usage, "total_tokens", 0)
+
+        return {
+            "num_requests": num_usage,
+            "completion_tokens": completion_tokens,
+            "prompt_tokens": prompt_tokens,
+            "total_tokens": total_tokens,
+        }

@@ -3,12 +3,13 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Any
 
 import datasets
 from dotenv import load_dotenv
 
-from nep_qa_dataset import llm
+from datagen import llm
+
 
 load_dotenv()
 
@@ -49,9 +50,6 @@ class AutoDataSourceConfig:
     @classmethod
     def from_config(cls, source_config: dict):
         module = source_config.get("module", "hf")
-        # if module.lower() == "json":
-        #     ...
-
         return HFDataSourceConfig.from_config(source_config)
 
 
@@ -83,7 +81,7 @@ class DummyModelConfig(ModelConfig):
         return cls(response=response)
 
     def create_llm(self) -> llm.LLM:
-        from nep_qa_dataset.llm.dummy import DummyLLM
+        from datagen.llm.dummy import DummyLLM
 
         return DummyLLM(response=self.response)
 
@@ -125,7 +123,7 @@ class OpenAIModelConfig(ModelConfig):
     def create_llm(self) -> llm.LLM:
         import openai
 
-        from nep_qa_dataset.llm.openai import OpenAILLM
+        from datagen.llm.openai import OpenAILLM
 
         client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         return OpenAILLM(
@@ -170,8 +168,7 @@ class LitellmModelConfig(ModelConfig):
         )
 
     def create_llm(self) -> llm.LLM:
-        import litellm
-        from nep_qa_dataset.llm.litellm import LiteLLM
+        from datagen.llm.litellm import LiteLLM
 
         return LiteLLM(
             model=self.model,
@@ -187,7 +184,6 @@ class LitellmModelConfig(ModelConfig):
 class AutoModelConfig:
     @classmethod
     def from_config(cls, model_config: dict):
-        print(model_config)
         backend = model_config.get("backend")
         if not backend:
             raise ValueError("`backend` must be defined in the model config")
@@ -212,179 +208,6 @@ class DataSetConfig:
     max_failures: float | int
 
 
-T = TypeVar("T", bound=DataSetConfig, covariant=True)
-
-
-@dataclass
-class GeneratorConfig(Generic[T], abc.ABC):
-    default_model: str
-    sources_config: dict[str, DataSourceConfig]
-    models_config: dict[str, ModelConfig]
-    source_datasets_config: list[T]
-
-    @classmethod
-    @abc.abstractmethod
-    def from_config(
-        cls,
-        generator_config: dict,
-        sources_config: dict[str, DataSourceConfig],
-        models_config: dict[str, ModelConfig],
-    ):
-        raise NotImplementedError()
-
-    @abc.abstractmethod
-    def create_generator(self):
-        raise NotImplementedError()
-
-
-@dataclass
-class QuestionAnswerDatasetConfig(DataSetConfig):
-    passage_column: str
-
-
-@dataclass
-class QuestionAnswerGeneratorConfig(GeneratorConfig[QuestionAnswerDatasetConfig]):
-    @classmethod
-    def from_config(
-        cls,
-        generator_config: dict,
-        sources_config: dict[str, DataSourceConfig],
-        models_config: dict[str, ModelConfig],
-    ):
-        source_datasets_config: list[dict] = generator_config["params"].get(
-            "source_datasets", []
-        )
-        default_system_prompt = generator_config["params"].get("default_system_prompt")
-
-        default_model = generator_config["params"].get("default_model")
-        if not default_model:
-            raise ValueError("`default_model` must be set under params")
-
-        if default_model not in models_config:
-            raise ValueError(
-                f"`{default_model}` model has not been defined in `models`"
-            )
-
-        if not source_datasets_config:
-            raise ValueError(
-                "At least one source_datasets must be defined in generator"
-            )
-
-        source_datasets = []
-        for src_ds in source_datasets_config:
-            if src_ds["name"] not in sources_config:
-                raise ValueError(
-                    f"source_dataset with name {src_ds['name']} is not defined in sources section."
-                )
-
-            sys_prompt = src_ds.get("system_prompt")
-            if sys_prompt is None and default_system_prompt is None:
-                raise ValueError(
-                    f"Either system_prompt for dataset `{src_ds['name']}` or `default_system_prompt` must be defined in generator.params"
-                )
-
-            model_name = src_ds.get("model", default_model)
-            source_datasets.append(
-                QuestionAnswerDatasetConfig(
-                    source_name=src_ds["name"],
-                    passage_column=src_ds["passage_column"],
-                    source_config=sources_config[src_ds["name"]],
-                    model_config=models_config[model_name],
-                    model_name=model_name,
-                    system_prompt=src_ds.get("system_prompt", default_system_prompt),
-                    max_records=src_ds.get("max_records", 100),
-                    shuffle=src_ds.get("shuffle", False),
-                    max_failures=src_ds.get("max_failures", 0.5),
-                )
-            )
-
-        return cls(
-            source_datasets_config=source_datasets,
-            default_model=default_model,
-            sources_config=sources_config,
-            models_config=models_config,
-        )
-
-    def create_generator(self):
-        from nep_qa_dataset.generators import QuestionAnswerGenerator
-
-        return QuestionAnswerGenerator(config=self)
-
-
-@dataclass
-class ParaphraseDatasetConfig(DataSetConfig):
-    sentence_column: str
-
-
-@dataclass
-class ParaphraseGeneratorConfig(GeneratorConfig[ParaphraseDatasetConfig]):
-    @classmethod
-    def from_config(
-        cls,
-        generator_config: dict,
-        sources_config: dict[str, DataSourceConfig],
-        models_config: dict[str, ModelConfig],
-    ):
-        source_datasets_config: list[dict] = generator_config["params"].get(
-            "source_datasets", []
-        )
-        default_system_prompt = generator_config["params"].get("default_system_prompt")
-
-        default_model = generator_config["params"].get("default_model")
-        if not default_model:
-            raise ValueError("`default_model` must be set under params")
-
-        if default_model not in models_config:
-            raise ValueError(
-                f"`{default_model}` model has not been defined in `models`"
-            )
-
-        if not source_datasets_config:
-            raise ValueError(
-                "At least one source_datasets must be defined in generator"
-            )
-
-        source_datasets = []
-        for src_ds in source_datasets_config:
-            if src_ds["name"] not in sources_config:
-                raise ValueError(
-                    f"source_dataset with name {src_ds['name']} is not defined in sources section."
-                )
-
-            sys_prompt = src_ds.get("system_prompt")
-            if sys_prompt is None and default_system_prompt is None:
-                raise ValueError(
-                    f"Either system_prompt for dataset `{src_ds['name']}` or `default_system_prompt` must be defined in generator.params"
-                )
-
-            model_name = src_ds.get("model", default_model)
-            source_datasets.append(
-                ParaphraseDatasetConfig(
-                    source_name=src_ds["name"],
-                    sentence_column=src_ds["sentence_column"],
-                    source_config=sources_config[src_ds["name"]],
-                    model_config=models_config[model_name],
-                    model_name=model_name,
-                    system_prompt=src_ds.get("system_prompt", default_system_prompt),
-                    max_records=src_ds.get("max_records", 100),
-                    shuffle=src_ds.get("shuffle", False),
-                    max_failures=src_ds.get("max_failures", 0.5),
-                )
-            )
-
-        return cls(
-            source_datasets_config=source_datasets,
-            default_model=default_model,
-            sources_config=sources_config,
-            models_config=models_config,
-        )
-
-    def create_generator(self):
-        from nep_qa_dataset.generators import ParaphraseGenerator
-
-        return ParaphraseGenerator(config=self)
-
-
 @dataclass
 class AutoGeneratorConfig:
     @classmethod
@@ -394,29 +217,19 @@ class AutoGeneratorConfig:
         sources_config: dict[str, DataSourceConfig],
         models_config: dict[str, ModelConfig],
     ):
-        source_datasets: list[dict] = generator_config["params"]["source_datasets"]
+        from datagen.core.registry import GeneratorRegistry
 
-        for src_ds in source_datasets:
-            if src_ds["name"] not in sources_config:
-                raise ValueError(
-                    f"source_dataset with name {src_ds['name']} is not defined in sources section."
-                )
+        # Support both old module format and new generator name format
+        generator_name = generator_config.get("generator")
+        if not generator_name:
+            raise Exception("Generator config must have `generator` field.")
 
-        # based on module, create a generator config
-        module = generator_config["module"]
-        if module.lower() == "datagen.questionanswergenerator":
-            return QuestionAnswerGeneratorConfig.from_config(
-                generator_config,
-                sources_config=sources_config,
-                models_config=models_config,
-            )
-        elif module.lower() == "datagen.paraphrasegenerator":
-            return ParaphraseGeneratorConfig.from_config(
-                generator_config,
-                sources_config=sources_config,
-                models_config=models_config,
-            )
-        raise ValueError(f"Unsupported generator module: {module}")
+        return GeneratorRegistry.create_generator_config(
+            name=generator_name,
+            config_dict=generator_config,
+            sources_config=sources_config,
+            models_config=models_config,
+        )
 
 
 @dataclass
@@ -441,7 +254,7 @@ class GenerationPipelineConfig:
 
     models_config: dict[str, ModelConfig]
 
-    generator_config: GeneratorConfig
+    generator_config: Any  # BaseGeneratorConfig type from generators.py
     generation_logging_steps: int
 
     curator_config: CuratorConfig
@@ -452,7 +265,7 @@ class GenerationPipelineConfig:
         config_dict = tomllib.load(path.open("rb"))
 
         description = config_dict.get(
-            "description", "Dataset generated using nep_qa_dataset library!"
+            "description", "Dataset generated using datagen library!"
         )
         authors = config_dict.get("authors", [])
 
@@ -536,7 +349,7 @@ class GenerationPipelineConfig:
             ],
             curators=self.authors,
             dataset_description=self.description
-            + "\nThis dataset was automatically generated using [this](https://github.com/jangedoo) library",
+            + "\nThis dataset was automatically generated using [llm-data-gen](https://github.com/jangedoo/llm-data-gen) library",
             citation_bibtex=self.curator_config.citation_bibtex,
             dataset_card_authors=self.authors,
         )

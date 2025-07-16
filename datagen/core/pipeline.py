@@ -6,7 +6,7 @@ from pathlib import Path
 
 import datasets
 
-from nep_qa_dataset.gen_config import GenerationPipelineConfig
+from datagen.core.gen_config import GenerationPipelineConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ class GenerationPipeline:
         with open(valid_file_path, "a") as valid_f, open(
             invalid_file_path, "a"
         ) as invalid_f:
+            row_num = 0
             for row_num, row in enumerate(rows, start=1):
                 meta = row["__meta"]
                 is_valid = meta["is_valid"]
@@ -70,7 +71,7 @@ class GenerationPipeline:
                         f"{self.num_valid_generated:,} valid rows written to {valid_file_path} and {self.num_invalid_generated:,} invalid ones written to {invalid_file_path} so far"
                     )
 
-        logger.info(f"Wrote {row_num:,} rows")
+            logger.info(f"Wrote {row_num:,} rows")
         logger.info(
             f"{self.num_valid_generated:,} valid rows written to {valid_file_path} and {self.num_invalid_generated:,} invalid ones written to {invalid_file_path}"
         )
@@ -84,7 +85,7 @@ class GenerationPipeline:
         path: Path | str | None = None,
         repo_id: str | None = None,
         commit_message: str | None = None,
-        update_card: bool | None = False,
+        update_card: bool | None = None,
     ):
         if repo_id is None and not self.config.curator_config.upload_to_hf:
             raise Exception("upload_to_hub is not set to true in config")
@@ -101,11 +102,17 @@ class GenerationPipeline:
             else self.config.curator_config.update_card
         )
 
-        ds = datasets.Dataset.from_json(str(path))
+        ds: datasets.Dataset = datasets.Dataset.from_json(str(path))  # type: ignore
         if len(ds) == 0:
             logger.warning("dataset has no rows. Not uploading to HuggingFace Hub")
             return
         ds = ds.remove_columns(["__meta"])
         ds.push_to_hub(repo_id=repo_id, commit_message=commit_message or "upload data")
+        logger.info(
+            f"Pushed dataset to HuggingFace Hub: https://huggingface.co/datasets/{repo_id}"
+        )
         if update_card:
             self.config.create_hf_dataset_card().push_to_hub(repo_id)
+            logger.info(
+                f"Pushed dataset card to HuggingFace Hub: https://huggingface.co/datasets/{repo_id}"
+            )
