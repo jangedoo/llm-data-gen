@@ -5,12 +5,15 @@ import re
 from typing import Generic, TypeVar
 
 import datasets
+from pydantic import BaseModel
 
 from nep_qa_dataset.gen_config import (
     DataSetConfig,
     GeneratorConfig,
     QuestionAnswerDatasetConfig,
     QuestionAnswerGeneratorConfig,
+    ParaphraseGeneratorConfig,
+    ParaphraseDatasetConfig,
 )
 from nep_qa_dataset.llm import LLM
 
@@ -65,6 +68,74 @@ class Generator(Generic[GeneratorConfigT], abc.ABC):
                 f"Finished processing dataset {src_ds_config.source_name}. Total llm consumption: {llm.get_usage_stats()}"
             )
         logger.info(f"Finished processing all datasets")
+
+
+class ParaphraseResponse(BaseModel):
+    paraphrase: str
+
+
+class ParaphraseGenerator(Generator[ParaphraseGeneratorConfig]):
+    def __init__(self, config: ParaphraseGeneratorConfig):
+        super().__init__(config=config)
+
+    def get_dataset(self, ds_config: ParaphraseDatasetConfig):
+        ds = super().get_dataset(ds_config)
+        return ds.select_columns([ds_config.sentence_column])
+
+    def _create_messages(self, system_prompt: str, sentence: str) -> list[dict]:
+        return [
+            dict(role="system", content=system_prompt),
+            dict(role="user", content=sentence),
+        ]
+
+    def process_dataset(
+        self, ds: datasets.Dataset, ds_config: ParaphraseDatasetConfig, llm: LLM
+    ):
+        total_failures = 0
+        max_failures = (
+            ds_config.max_failures
+            if isinstance(ds_config.max_failures, int)
+            else int(len(ds) * ds_config.max_failures)
+        )
+
+        for sentence in ds[ds_config.sentence_column]:
+            truncated_sentence = sentence[:1500]
+            messages = self._create_messages(
+                system_prompt=ds_config.system_prompt, sentence=truncated_sentence
+            )
+            try:
+                llm_response: ParaphraseResponse = llm.generate(
+                    messages=messages, response_format=ParaphraseResponse
+                )  # type: ignore
+                yield dict(
+                    sentence=sentence,
+                    paraphrase=llm_response.paraphrase,
+                    __meta=dict(
+                        dataset_name=ds_config.source_name,
+                        is_valid=True,
+                        reason="",
+                    ),
+                )
+            except Exception as e:
+                total_failures += 1
+                logger.warning(
+                    f"Unable to get response from llm for sentence {sentence}",
+                    exc_info=True,
+                )
+                yield dict(
+                    sentence=sentence,
+                    paraphrase=None,
+                    __meta=dict(
+                        dataset_name=ds_config.source_name,
+                        is_valid=False,
+                        reason=str(e),
+                    ),
+                )
+                if total_failures >= max_failures:
+                    logger.warning(
+                        f"Number of failures {total_failures} exceeded maximum allowed failures {max_failures}. Not processing dataset: {ds_config.source_name}"
+                    )
+                    return
 
 
 class QuestionAnswerGenerator(Generator[QuestionAnswerGeneratorConfig]):

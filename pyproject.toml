@@ -13,6 +13,7 @@ pandas = "^2.2.2"
 click = "^8.1.7"
 openai = "^1.42.0"
 python-dotenv = "^1.0.1"
+litellm = "^1.74.3"
 
 
 [tool.poetry.group.dev.dependencies]

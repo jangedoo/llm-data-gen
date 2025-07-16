@@ -1,4 +1,5 @@
 import abc
+from pydantic import BaseModel
 
 
 class LLM(abc.ABC):
@@ -6,8 +7,8 @@ class LLM(abc.ABC):
     def generate(
         self,
         messages: list[dict],
-        response_format: dict = {"type": "text"},
-    ) -> str | None:
+        response_format: dict | type[BaseModel] | None = None,
+    ) -> str | BaseModel | None:
         raise NotImplementedError()
 
     def get_usage_stats(self) -> dict:

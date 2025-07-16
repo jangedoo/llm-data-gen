@@ -1,4 +1,5 @@
 import openai
+from pydantic import BaseModel
 
 from nep_qa_dataset.llm.base import LLM
 
@@ -28,9 +29,12 @@ class OpenAILLM(LLM):
     def generate(
         self,
         messages: list[dict],
-        response_format: dict = {"type": "text"},
-    ) -> str | None:
-        response = self.client.chat.completions.create(
+        response_format: dict | type[BaseModel] | None = None,
+    ) -> str | BaseModel | None:
+        if not response_format:
+            response_format = {"type": "text"}
+
+        response = self.client.beta.chat.completions.create(
             messages=messages,
             model=self.model,
             temperature=self.temperature,

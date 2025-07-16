@@ -1,0 +1,43 @@
+dataset_name = "Nepali Paraphrase Dataset for Semantic Similarity Tasks"
+description = "Nepali Paraphrase Dataset"
+authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
+
+# where to store the raw files
+generation_output_dir = "../raw_data/parapharse/json"
+
+# log will be printed every N steps when saving extracted data
+generation_logging_steps = 100
+
+# 1. define sources
+[sources.nepalinews]
+path = "jangedoo/nepalinews"
+split = "train"
+
+# 2. define model
+[models."openai-gpt-4.1-mini"]
+backend = "litellm"
+[models."openai-gpt-4.1-mini".params]
+model = "gpt-4.1-mini"
+max_tokens = 5000
+
+# 3. define generator
+[generator]
+module = "datagen.ParaphraseGenerator"
+
+[generator.params]
+default_model = "openai-gpt-4.1-mini"
+source_datasets = [
+    { name = "nepalinews", sentence_column="excerpt", max_records=10, shuffle=true}
+]
+
+default_system_prompt = """\
+You will be given a sentence either in English or in Nepali. You will generate a paraphrase.
+The paraphrase must convey the same information but use very different way to write it.
+"""
+
+# 4. define curator
+[curator.params]
+upload_to_hf = true
+upload_repo_id = "jangedoo/nepali_paraphrase"
+language = ['ne']
+license = 'mit'

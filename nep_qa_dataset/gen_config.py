@@ -89,25 +89,6 @@ class DummyModelConfig(ModelConfig):
 
 
 @dataclass
-class LlamaCPPModelConfig(ModelConfig):
-    repo_id: str
-    file_name: str
-
-    @classmethod
-    def from_config(cls, model_config: dict):
-        params = model_config.get("params", {})
-        if not params:
-            raise ValueError(f"`params` must be defined")
-
-        repo_id = params["repo_id"]
-        file_name = params["file_name"]
-        return cls(repo_id=repo_id, file_name=file_name)
-
-    def create_llm(self) -> llm.LLM:
-        raise NotImplementedError()
-
-
-@dataclass
 class OpenAIModelConfig(ModelConfig):
     model: str
     temperature: float = 0.3
@@ -159,16 +140,64 @@ class OpenAIModelConfig(ModelConfig):
 
 
 @dataclass
+class LitellmModelConfig(ModelConfig):
+    model: str
+    temperature: float = 0.3
+    max_tokens: int = 1000
+    top_p: float = 1
+    frequency_penalty: float = 0
+    presence_penalty: float = 0
+
+    @classmethod
+    def from_config(cls, model_config: dict):
+        params = model_config.get("params", {})
+        model = params.get("model")
+        if not model:
+            raise ValueError("`model` must be defined in the model config")
+
+        temperature = float(params.get("temperature", 0.3))
+        max_tokens = int(params.get("max_tokens", 1000))
+        top_p = float(params.get("top_p", 1))
+        frequency_penalty = float(params.get("frequency_penalty", 0))
+        presence_penalty = float(params.get("presence_penalty", 0))
+        return cls(
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+        )
+
+    def create_llm(self) -> llm.LLM:
+        import litellm
+        from nep_qa_dataset.llm.litellm import LiteLLM
+
+        return LiteLLM(
+            model=self.model,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            top_p=self.top_p,
+            frequency_penalty=self.frequency_penalty,
+            presence_penalty=self.presence_penalty,
+        )
+
+
+@dataclass
 class AutoModelConfig:
     @classmethod
     def from_config(cls, model_config: dict):
-        backend = model_config.get("backend", "llama_cpp")
+        print(model_config)
+        backend = model_config.get("backend")
+        if not backend:
+            raise ValueError("`backend` must be defined in the model config")
         if backend.lower() == "openai":
             return OpenAIModelConfig.from_config(model_config=model_config)
         elif backend.lower() == "dummy":
             return DummyModelConfig.from_config(model_config=model_config)
-
-        return LlamaCPPModelConfig.from_config(model_config=model_config)
+        elif backend.lower() == "litellm":
+            return LitellmModelConfig.from_config(model_config=model_config)
+        raise ValueError(f"Unsupported model backend: {backend}")
 
 
 @dataclass
@@ -283,6 +312,80 @@ class QuestionAnswerGeneratorConfig(GeneratorConfig[QuestionAnswerDatasetConfig]
 
 
 @dataclass
+class ParaphraseDatasetConfig(DataSetConfig):
+    sentence_column: str
+
+
+@dataclass
+class ParaphraseGeneratorConfig(GeneratorConfig[ParaphraseDatasetConfig]):
+    @classmethod
+    def from_config(
+        cls,
+        generator_config: dict,
+        sources_config: dict[str, DataSourceConfig],
+        models_config: dict[str, ModelConfig],
+    ):
+        source_datasets_config: list[dict] = generator_config["params"].get(
+            "source_datasets", []
+        )
+        default_system_prompt = generator_config["params"].get("default_system_prompt")
+
+        default_model = generator_config["params"].get("default_model")
+        if not default_model:
+            raise ValueError("`default_model` must be set under params")
+
+        if default_model not in models_config:
+            raise ValueError(
+                f"`{default_model}` model has not been defined in `models`"
+            )
+
+        if not source_datasets_config:
+            raise ValueError(
+                "At least one source_datasets must be defined in generator"
+            )
+
+        source_datasets = []
+        for src_ds in source_datasets_config:
+            if src_ds["name"] not in sources_config:
+                raise ValueError(
+                    f"source_dataset with name {src_ds['name']} is not defined in sources section."
+                )
+
+            sys_prompt = src_ds.get("system_prompt")
+            if sys_prompt is None and default_system_prompt is None:
+                raise ValueError(
+                    f"Either system_prompt for dataset `{src_ds['name']}` or `default_system_prompt` must be defined in generator.params"
+                )
+
+            model_name = src_ds.get("model", default_model)
+            source_datasets.append(
+                ParaphraseDatasetConfig(
+                    source_name=src_ds["name"],
+                    sentence_column=src_ds["sentence_column"],
+                    source_config=sources_config[src_ds["name"]],
+                    model_config=models_config[model_name],
+                    model_name=model_name,
+                    system_prompt=src_ds.get("system_prompt", default_system_prompt),
+                    max_records=src_ds.get("max_records", 100),
+                    shuffle=src_ds.get("shuffle", False),
+                    max_failures=src_ds.get("max_failures", 0.5),
+                )
+            )
+
+        return cls(
+            source_datasets_config=source_datasets,
+            default_model=default_model,
+            sources_config=sources_config,
+            models_config=models_config,
+        )
+
+    def create_generator(self):
+        from nep_qa_dataset.generators import ParaphraseGenerator
+
+        return ParaphraseGenerator(config=self)
+
+
+@dataclass
 class AutoGeneratorConfig:
     @classmethod
     def from_config(
@@ -301,9 +404,19 @@ class AutoGeneratorConfig:
 
         # based on module, create a generator config
         module = generator_config["module"]
-        return QuestionAnswerGeneratorConfig.from_config(
-            generator_config, sources_config=sources_config, models_config=models_config
-        )
+        if module.lower() == "datagen.questionanswergenerator":
+            return QuestionAnswerGeneratorConfig.from_config(
+                generator_config,
+                sources_config=sources_config,
+                models_config=models_config,
+            )
+        elif module.lower() == "datagen.paraphrasegenerator":
+            return ParaphraseGeneratorConfig.from_config(
+                generator_config,
+                sources_config=sources_config,
+                models_config=models_config,
+            )
+        raise ValueError(f"Unsupported generator module: {module}")
 
 
 @dataclass
