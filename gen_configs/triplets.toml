@@ -74,6 +74,7 @@ source_datasets = [
 [curator.params]
 upload_to_hf = true
 upload_repo_id = "jangedoo/nepali-triplets"
+train_test_split = true
 update_card = true
 language = [
     "en", "ne",

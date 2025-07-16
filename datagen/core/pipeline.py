@@ -86,6 +86,7 @@ class GenerationPipeline:
         repo_id: str | None = None,
         commit_message: str | None = None,
         update_card: bool | None = None,
+        train_test_split: bool | None = None,
     ):
         if repo_id is None and not self.config.curator_config.upload_to_hf:
             raise Exception("upload_to_hub is not set to true in config")
@@ -107,7 +108,33 @@ class GenerationPipeline:
             logger.warning("dataset has no rows. Not uploading to HuggingFace Hub")
             return
         ds = ds.remove_columns(["__meta"])
-        ds.push_to_hub(repo_id=repo_id, commit_message=commit_message or "upload data")
+
+        train_test_split = (
+            train_test_split
+            if train_test_split is not None
+            else self.config.curator_config.train_test_split
+        )
+
+        if train_test_split:
+            logger.info("Splitting dataset into train, test, and valid")
+            train_remaining_ds = ds.train_test_split(test_size=0.2)
+            test_valid_ds = train_remaining_ds["test"].train_test_split(test_size=0.5)
+            logger.info(
+                f"Split dataset into train: {len(train_remaining_ds['train'])}, test: {len(test_valid_ds['test'])}, valid: {len(test_valid_ds['train'])}"
+            )
+            final_ds = datasets.DatasetDict(
+                {
+                    "train": train_remaining_ds["train"],
+                    "test": test_valid_ds["test"],
+                    "valid": test_valid_ds["train"],
+                }
+            )
+        else:
+            final_ds = ds
+
+        final_ds.push_to_hub(
+            repo_id=repo_id, commit_message=commit_message or "upload data"
+        )
         logger.info(
             f"Pushed dataset to HuggingFace Hub: https://huggingface.co/datasets/{repo_id}"
         )

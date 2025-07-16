@@ -239,6 +239,7 @@ class CuratorConfig:
     update_card: bool = True
     language: list = field(default_factory=list)
     license: str = "mit"
+    train_test_split: bool = True
     task_categories: list = field(default_factory=list)
     task_ids: list = field(default_factory=list)
     citation_bibtex: str = ""
@@ -314,6 +315,7 @@ class GenerationPipelineConfig:
             upload_repo_id=curator_data.get("upload_repo_id"),
             update_card=curator_data.get("update_card", True),
             language=curator_data.get("language"),
+            train_test_split=curator_data.get("train_test_split", True),
             license=curator_data.get("license"),
             task_categories=curator_data.get("task_categories"),
             task_ids=curator_data.get("task_ids"),
