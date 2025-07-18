@@ -1,4 +1,3 @@
-from .qa import QuestionAnswerGenerator
-from .triplets import TripletsGenerator
+from .templated import TemplatedGenerator
 
-__all__ = ["QuestionAnswerGenerator", "TripletsGenerator"]
+__all__ = ["TemplatedGenerator"]

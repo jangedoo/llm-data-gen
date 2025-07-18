@@ -1,0 +1,63 @@
+dataset_name = "Sentence Triplets Dataset"
+description = "Sentence triplets (positive/negative pairs) generated using the templated generator"
+authors = [
+    "Sanjaya Subedi <jangedoo@gmail.com>",
+]
+generation_output_dir = "../raw_data/triplets"
+generation_logging_steps = 100
+
+[sources.sentences]
+path = "sentence-transformers/all-nli"
+subset = "pair"
+split = "train"
+
+[models."gpt-4-mini"]
+backend = "litellm"
+
+[models."gpt-4-mini".params]
+model = "gpt-4.1-mini"
+temperature = 0.7
+max_tokens = 2000
+
+[generator]
+generator = "templated"
+
+[generator.params]
+default_model = "gpt-4-mini"
+
+default_system_prompt = """\
+You are an expert at creating sentence similarity datasets. Given an input sentence, generate:
+1. A positive sentence: semantically similar but with different wording
+2. A negative sentence: semantically different but on a related topic
+"""
+
+default_prompt_template = """\
+Input Sentence: {{ input.input_sentence }}
+
+Generate one positive sentence (similar meaning) and one negative sentence (different meaning) for the input.
+"""
+
+source_datasets = [
+    { name="sentences", max_records=10, shuffle=true}
+]
+
+structured_output_schema = """\
+from pydantic import Field
+
+class TripletResponse(BaseModel):
+    positive_sentence: str = Field(description="A sentence that is semantically similar to the input sentence")
+    negative_sentence: str = Field(description="A sentence that is semantically different from the input sentence")
+"""
+
+output_template = """\
+{
+    "anchorr": "{{ input.input_sentence }}",
+    "positiver": "{{ llm_output.positive_sentence }}",
+    "negativer": "{{ llm_output.negative_sentence }}"
+}
+"""
+
+# Define aliases for the sentences dataset (moved to end)
+[[generator.params.aliases]]
+source = "sentences"
+column_map = { input_sentence = "anchor" } 

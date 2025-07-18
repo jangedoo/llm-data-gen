@@ -1,13 +1,11 @@
-from .generators import BaseGeneratorConfig, BaseDatasetConfig, BaseGenerator
+from .generators import BaseGeneratorConfig, BaseGenerator
 from .pipeline import GenerationPipelineConfig
-from .registry import GeneratorRegistry
-from .gen_config import DataSourceConfig, ModelConfig
+from .gen_config import DataSourceConfig, ModelConfig, DataSetConfig
 
 __all__ = [
     "BaseGeneratorConfig",
     "GenerationPipelineConfig",
-    "GeneratorRegistry",
-    "BaseDatasetConfig",
+    "DataSetConfig",
     "BaseGenerator",
     "DataSourceConfig",
     "ModelConfig",

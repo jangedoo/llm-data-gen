@@ -23,16 +23,10 @@ from datagen.core.gen_config import (
     ModelConfig,
 )
 from datagen.llm import LLM
-from datagen.core.registry import GeneratorRegistry
 
 logger = logging.getLogger(__name__)
 
 DatasetConfigT = TypeVar("DatasetConfigT", bound=DataSetConfig)
-
-
-@dataclass
-class BaseDatasetConfig(DataSetConfig):
-    pass
 
 
 class BaseGeneratorConfig(Generic[DatasetConfigT], abc.ABC):
@@ -119,15 +113,11 @@ class BaseGeneratorConfig(Generic[DatasetConfigT], abc.ABC):
         pass
 
     def create_generator(self):
-        generator_class = self.__class__.__qualname__.replace(".Config", "")
-        from datagen.core.registry import GeneratorRegistry
+        # Import here to avoid circular imports
+        from datagen.generators.templated import TemplatedGenerator
 
-        # Find the generator by class name pattern
-        for name, info in GeneratorRegistry.list_generators().items():
-            if info.generator_class.__name__ == generator_class:
-                return info.generator_class(config=self)
-
-        raise ValueError(f"No generator found for config {self.__class__.__name__}")
+        # Cast self to the proper type since we only have one generator now
+        return TemplatedGenerator(config=self)  # type: ignore
 
 
 class BaseGenerator(Generic[DatasetConfigT], abc.ABC):

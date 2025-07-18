@@ -217,16 +217,20 @@ class AutoGeneratorConfig:
         sources_config: dict[str, DataSourceConfig],
         models_config: dict[str, ModelConfig],
     ):
-        from datagen.core.registry import GeneratorRegistry
+        from datagen.generators.templated import TemplatedGenerator
 
-        # Support both old module format and new generator name format
+        # Since we only support templated generator now
         generator_name = generator_config.get("generator")
         if not generator_name:
             raise Exception("Generator config must have `generator` field.")
 
-        return GeneratorRegistry.create_generator_config(
-            name=generator_name,
-            config_dict=generator_config,
+        if generator_name != "templated":
+            raise ValueError(
+                f"Only 'templated' generator is supported, got '{generator_name}'"
+            )
+
+        return TemplatedGenerator.Config.from_config(
+            generator_config=generator_config,
             sources_config=sources_config,
             models_config=models_config,
         )
