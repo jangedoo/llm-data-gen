@@ -10,7 +10,6 @@ from dotenv import load_dotenv
 
 from datagen import llm
 
-
 load_dotenv()
 
 
@@ -94,6 +93,8 @@ class OpenAIModelConfig(ModelConfig):
     top_p: float = 1
     frequency_penalty: float = 0
     presence_penalty: float = 0
+    api_base: str | None = None
+    api_key: str | None = None
 
     @classmethod
     def from_config(cls, model_config: dict):
@@ -101,15 +102,15 @@ class OpenAIModelConfig(ModelConfig):
 
         model = params.get("model")
         if not model:
-            raise ValueError(
-                "`model` must be defined under params for models with 'openai' backend"
-            )
+            raise ValueError("`model` must be defined under params for models with 'openai' backend")
 
         temperature = float(params.get("temperature", 0.3))
         max_tokens = int(params.get("max_tokens", 1000))
         top_p = float(params.get("top_p", 1))
         frequency_penalty = float(params.get("frequency_penalty", 0))
         presence_penalty = float(params.get("presence_penalty", 0))
+        api_base = params.get("api_base")
+        api_key = params.get("api_key")
 
         return cls(
             model=model,
@@ -118,6 +119,8 @@ class OpenAIModelConfig(ModelConfig):
             top_p=top_p,
             frequency_penalty=frequency_penalty,
             presence_penalty=presence_penalty,
+            api_base=api_base,
+            api_key=api_key,
         )
 
     def create_llm(self) -> llm.LLM:
@@ -125,52 +128,11 @@ class OpenAIModelConfig(ModelConfig):
 
         from datagen.llm.openai import OpenAILLM
 
-        client = openai.OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        api_key = self.api_key or os.environ.get("OPENAI_API_KEY")
+        api_base = self.api_base or os.environ.get("OPENAI_API_BASE")
+        client = openai.OpenAI(api_key=api_key, base_url=api_base)
         return OpenAILLM(
             client=client,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            top_p=self.top_p,
-            frequency_penalty=self.frequency_penalty,
-            presence_penalty=self.presence_penalty,
-        )
-
-
-@dataclass
-class LitellmModelConfig(ModelConfig):
-    model: str
-    temperature: float = 0.3
-    max_tokens: int = 1000
-    top_p: float = 1
-    frequency_penalty: float = 0
-    presence_penalty: float = 0
-
-    @classmethod
-    def from_config(cls, model_config: dict):
-        params = model_config.get("params", {})
-        model = params.get("model")
-        if not model:
-            raise ValueError("`model` must be defined in the model config")
-
-        temperature = float(params.get("temperature", 0.3))
-        max_tokens = int(params.get("max_tokens", 1000))
-        top_p = float(params.get("top_p", 1))
-        frequency_penalty = float(params.get("frequency_penalty", 0))
-        presence_penalty = float(params.get("presence_penalty", 0))
-        return cls(
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=top_p,
-            frequency_penalty=frequency_penalty,
-            presence_penalty=presence_penalty,
-        )
-
-    def create_llm(self) -> llm.LLM:
-        from datagen.llm.litellm import LiteLLM
-
-        return LiteLLM(
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -191,8 +153,6 @@ class AutoModelConfig:
             return OpenAIModelConfig.from_config(model_config=model_config)
         elif backend.lower() == "dummy":
             return DummyModelConfig.from_config(model_config=model_config)
-        elif backend.lower() == "litellm":
-            return LitellmModelConfig.from_config(model_config=model_config)
         raise ValueError(f"Unsupported model backend: {backend}")
 
 
@@ -225,9 +185,7 @@ class AutoGeneratorConfig:
             raise Exception("Generator config must have `generator` field.")
 
         if generator_name != "templated":
-            raise ValueError(
-                f"Only 'templated' generator is supported, got '{generator_name}'"
-            )
+            raise ValueError(f"Only 'templated' generator is supported, got '{generator_name}'")
 
         return TemplatedGenerator.Config.from_config(
             generator_config=generator_config,
@@ -269,9 +227,7 @@ class GenerationPipelineConfig:
         path = Path(path)
         config_dict = tomllib.load(path.open("rb"))
 
-        description = config_dict.get(
-            "description", "Dataset generated using datagen library!"
-        )
+        description = config_dict.get("description", "Dataset generated using datagen library!")
         authors = config_dict.get("authors", [])
 
         sources_data = config_dict.get("sources", {})
@@ -306,9 +262,7 @@ class GenerationPipelineConfig:
         generation_output_dir = Path(config_dict["generation_output_dir"])
         generation_output_dir = path.parent.joinpath(generation_output_dir).resolve()
         if not generation_output_dir.exists():
-            print(
-                f"{generation_output_dir} does not exist. Will create output directory"
-            )
+            print(f"{generation_output_dir} does not exist. Will create output directory")
             generation_output_dir.mkdir(exist_ok=True, parents=True)
 
         generation_logging_steps = int(config_dict.get("generation_logging_steps", 100))
@@ -348,11 +302,7 @@ class GenerationPipelineConfig:
             task_categories=self.curator_config.task_categories,
             task_ids=self.curator_config.task_ids,
             pretty_name=self.description,
-            source_datasets=[
-                c.path
-                for c in self.sources_config.values()
-                if isinstance(c, HFDataSourceConfig)
-            ],
+            source_datasets=[c.path for c in self.sources_config.values() if isinstance(c, HFDataSourceConfig)],
             curators=self.authors,
             dataset_description=self.description
             + "\nThis dataset was automatically generated using [llm-data-gen](https://github.com/jangedoo/llm-data-gen) library",

@@ -34,19 +34,36 @@ class OpenAILLM(LLM):
         if not response_format:
             response_format = {"type": "text"}
 
-        response = self.client.beta.chat.completions.create(
-            messages=messages,
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            frequency_penalty=self.frequency_penalty,
-            presence_penalty=self.presence_penalty,
-            top_p=self.top_p,
-            response_format=response_format,
-        )
+        if issubclass(response_format, BaseModel):
+            response = self.client.chat.completions.parse(
+                messages=messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                frequency_penalty=self.frequency_penalty,
+                presence_penalty=self.presence_penalty,
+                top_p=self.top_p,
+                response_format=response_format,
+                reasoning_effort="none",
+            )
+        else:
+            response = self.client.chat.completions.create(
+                messages=messages,
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                frequency_penalty=self.frequency_penalty,
+                presence_penalty=self.presence_penalty,
+                top_p=self.top_p,
+                reasoning_effort="none",
+            )
         if response.usage:
             self.usage_history.append(response.usage)
-        return response.choices[0].message.content
+
+        if issubclass(response_format, BaseModel):
+            return response.choices[0].message.parsed
+        else:
+            return response.choices[0].message.content
 
     def get_usage_stats(self) -> dict:
         completion_tokens = 0

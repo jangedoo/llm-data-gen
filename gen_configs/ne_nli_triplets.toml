@@ -1,7 +1,7 @@
 dataset_name = "Sentence Triplets Dataset"
-description = "Sentence triplets (positive/negative pairs) generated using the templated generator"
+description = "Sentence triplets (anchor, positive, negative pairs) in Nepali. "
 authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
-generation_output_dir = "../raw_data/triplets"
+generation_output_dir = "../raw_data/ne_nli_triplets"
 generation_logging_steps = 100
 
 [sources.sentences]
@@ -26,11 +26,21 @@ max_tokens = 2000
 api_base = "http://localhost:11434/v1"
 api_key = "abc"
 
+
+[models.gemma3]
+backend = "openai"
+
+[models.gemma3.params]
+model = "gemma3:12b"
+max_tokens = 2000
+api_base = "http://localhost:11434/v1"
+api_key = "abc"
+
 [generator]
 generator = "templated"
 
 [generator.params]
-default_model = "gpt_oss"
+default_model = "gemma3"
 
 default_system_prompt = """\
 You are an expert at creating sentence similarity datasets. Given a triplet of anchor, positive and negative in English, you should translate them to Nepali.
@@ -42,7 +52,7 @@ Positive Sentence: {{ input.positive }}
 Negative Sentence: {{ input.negative }}
 """
 
-source_datasets = [{ name = "sentences", max_records = 5, shuffle = true }]
+source_datasets = [{ name = "sentences", max_records = 10, shuffle = true }]
 
 structured_output_schema = """\
 from pydantic import Field
@@ -69,3 +79,14 @@ output_template = """\
 [[generator.params.aliases]]
 source = "sentences"
 column_map = { input_sentence = "anchor" }
+
+
+[curator.params]
+upload_to_hf = false
+upload_repo_id = "jangedoo/nepali-nli-triplets"
+train_test_split = true
+update_card = true
+language = ["en", "ne"]
+license = "mit"
+task_categories = []
+task_ids = []
