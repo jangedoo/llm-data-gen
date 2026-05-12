@@ -1,0 +1,17 @@
+{% if preview.ok %}
+  <h3>{{ preview.source_name }}</h3>
+  {% for row in preview.rows %}
+    <pre>{{ row | tojson(indent=2) }}</pre>
+  {% else %}
+    <p class="muted">No rows returned.</p>
+  {% endfor %}
+{% else %}
+  <div class="notice error">
+    <strong>Preview failed.</strong>
+    <ul>
+      {% for error in preview.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

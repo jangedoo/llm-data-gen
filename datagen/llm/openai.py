@@ -34,7 +34,11 @@ class OpenAILLM(LLM):
         if not response_format:
             response_format = {"type": "text"}
 
-        if issubclass(response_format, BaseModel):
+        is_structured_response = isinstance(response_format, type) and issubclass(
+            response_format, BaseModel
+        )
+
+        if is_structured_response:
             response = self.client.chat.completions.parse(
                 messages=messages,
                 model=self.model,
@@ -44,7 +48,6 @@ class OpenAILLM(LLM):
                 presence_penalty=self.presence_penalty,
                 top_p=self.top_p,
                 response_format=response_format,
-                reasoning_effort="none",
             )
         else:
             response = self.client.chat.completions.create(
@@ -55,12 +58,11 @@ class OpenAILLM(LLM):
                 frequency_penalty=self.frequency_penalty,
                 presence_penalty=self.presence_penalty,
                 top_p=self.top_p,
-                reasoning_effort="none",
             )
         if response.usage:
             self.usage_history.append(response.usage)
 
-        if issubclass(response_format, BaseModel):
+        if is_structured_response:
             return response.choices[0].message.parsed
         else:
             return response.choices[0].message.content

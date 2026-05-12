@@ -1,0 +1,42 @@
+dataset_name = "Dataset generated with templated generator"
+description = "Dataset generated using the templated generator."
+authors = [
+    "Your Name <you@example.com>",
+]
+generation_output_dir = "../raw_data/new_dataset"
+generation_logging_steps = 100
+
+[sources.source]
+path = "jangedoo/nepalinews"
+split = "train"
+
+[models."gpt-4.1-mini"]
+backend = "openai"
+
+[models."gpt-4.1-mini".params]
+model = "gpt-4.1-mini"
+temperature = 0.3
+max_tokens = 1000
+
+[generator]
+generator = "templated"
+
+[generator.params]
+default_model = "gpt-4.1-mini"
+output_template = "{\n  \"input\": \"{{ input.title }}\",\n  \"output\": \"{{ llm_output }}\"\n}"
+default_system_prompt = "You will be given a news article body, you must come up with a title for that article which will be used in the news website as well as printed paper."
+default_prompt_template = "article: {{ input.title }}"
+source_datasets = [
+    { name = "source", max_records = 100, shuffle = false, max_failures = 0.5 },
+]
+
+[curator.params]
+upload_to_hf = false
+train_test_split = true
+update_card = true
+language = [
+    "en",
+]
+license = "mit"
+task_categories = []
+task_ids = []

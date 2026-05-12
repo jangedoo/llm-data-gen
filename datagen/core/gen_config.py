@@ -102,7 +102,9 @@ class OpenAIModelConfig(ModelConfig):
 
         model = params.get("model")
         if not model:
-            raise ValueError("`model` must be defined under params for models with 'openai' backend")
+            raise ValueError(
+                "`model` must be defined under params for models with 'openai' backend"
+            )
 
         temperature = float(params.get("temperature", 0.3))
         max_tokens = int(params.get("max_tokens", 1000))
@@ -185,7 +187,9 @@ class AutoGeneratorConfig:
             raise Exception("Generator config must have `generator` field.")
 
         if generator_name != "templated":
-            raise ValueError(f"Only 'templated' generator is supported, got '{generator_name}'")
+            raise ValueError(
+                f"Only 'templated' generator is supported, got '{generator_name}'"
+            )
 
         return TemplatedGenerator.Config.from_config(
             generator_config=generator_config,
@@ -223,11 +227,26 @@ class GenerationPipelineConfig:
     curator_config: CuratorConfig
 
     @classmethod
-    def from_path(cls, path: Path | str):
+    def from_path(cls, path: Path | str, create_output_dir: bool = True):
         path = Path(path)
         config_dict = tomllib.load(path.open("rb"))
+        return cls.from_dict(
+            config_dict=config_dict,
+            base_dir=path.parent,
+            create_output_dir=create_output_dir,
+        )
 
-        description = config_dict.get("description", "Dataset generated using datagen library!")
+    @classmethod
+    def from_dict(
+        cls,
+        config_dict: dict,
+        base_dir: Path | str = Path("."),
+        create_output_dir: bool = True,
+    ):
+        base_dir = Path(base_dir)
+        description = config_dict.get(
+            "description", "Dataset generated using datagen library!"
+        )
         authors = config_dict.get("authors", [])
 
         sources_data = config_dict.get("sources", {})
@@ -238,6 +257,15 @@ class GenerationPipelineConfig:
         for source_key, source_data in sources_data.items():
             sources_config[source_key] = AutoDataSourceConfig.from_config(source_data)
 
+        generator_data = config_dict.get("generator", {})
+        if not generator_data:
+            raise ValueError("`generator` must be defined in the config")
+        generator_name = generator_data.get("generator")
+        if generator_name != "templated":
+            raise ValueError(
+                f"Only 'templated' generator is supported, got '{generator_name}'"
+            )
+
         models_data = config_dict.get("models", {})
         if not models_data:
             raise ValueError("`models` must be defined in the config")
@@ -247,11 +275,6 @@ class GenerationPipelineConfig:
             model_config = AutoModelConfig.from_config(model_data)
             models_config[model_key] = model_config
 
-        # generator config
-        generator_data = config_dict.get("generator", {})
-        if not generator_data:
-            raise ValueError("`generator` must be defined in the config")
-
         generator_config = AutoGeneratorConfig.from_config(
             generator_data, sources_config=sources_config, models_config=models_config
         )
@@ -260,9 +283,11 @@ class GenerationPipelineConfig:
             raise ValueError("`generation_output_dir` must be specified in the config")
 
         generation_output_dir = Path(config_dict["generation_output_dir"])
-        generation_output_dir = path.parent.joinpath(generation_output_dir).resolve()
-        if not generation_output_dir.exists():
-            print(f"{generation_output_dir} does not exist. Will create output directory")
+        generation_output_dir = base_dir.joinpath(generation_output_dir).resolve()
+        if create_output_dir and not generation_output_dir.exists():
+            print(
+                f"{generation_output_dir} does not exist. Will create output directory"
+            )
             generation_output_dir.mkdir(exist_ok=True, parents=True)
 
         generation_logging_steps = int(config_dict.get("generation_logging_steps", 100))
@@ -302,7 +327,11 @@ class GenerationPipelineConfig:
             task_categories=self.curator_config.task_categories,
             task_ids=self.curator_config.task_ids,
             pretty_name=self.description,
-            source_datasets=[c.path for c in self.sources_config.values() if isinstance(c, HFDataSourceConfig)],
+            source_datasets=[
+                c.path
+                for c in self.sources_config.values()
+                if isinstance(c, HFDataSourceConfig)
+            ],
             curators=self.authors,
             dataset_description=self.description
             + "\nThis dataset was automatically generated using [llm-data-gen](https://github.com/jangedoo/llm-data-gen) library",

@@ -75,6 +75,19 @@ def push_to_hub(
     )
 
 
+@cli.command("web")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8000, type=int, show_default=True)
+def web(host: str, port: int):
+    """Run the local Dataset Studio web interface."""
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise click.ClickException("Dataset Studio is local-only; bind to 127.0.0.1")
+
+    import uvicorn
+
+    uvicorn.run("datagen.web:create_app", factory=True, host=host, port=port)
+
+
 @cli.command("generate-config")
 @click.option(
     "--output",

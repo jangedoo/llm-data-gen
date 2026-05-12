@@ -1,0 +1,12 @@
+{% if validation.ok %}
+  <div class="notice ok">{{ 'Saved and valid.' if saved else 'Config is valid.' }}</div>
+{% else %}
+  <div class="notice error">
+    <strong>Config is invalid.</strong>
+    <ul>
+      {% for error in validation.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

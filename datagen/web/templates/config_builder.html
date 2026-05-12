@@ -1,0 +1,565 @@
+{% extends "base.html" %}
+{% block title %}{{ existing_name or 'New Config' }}{% endblock %}
+{% block content %}
+<section class="section builder-page">
+  <div class="section-head">
+    <div>
+      <h1>{{ 'Edit Config' if existing_name else 'New Templated Config' }}</h1>
+      <p class="muted">{{ 'Guided editor for ' ~ existing_name if existing_name else 'Builds a TOML config for the supported templated generator.' }}</p>
+    </div>
+    <div class="actions">
+      {% if existing_name %}
+        <a class="button secondary" href="/outputs/{{ existing_name }}">Outputs</a>
+      {% endif %}
+      <a class="button secondary" href="/settings">Model Settings</a>
+    </div>
+  </div>
+
+  <div class="builder-layout">
+    <div class="builder-main">
+      <details class="guide-step" open>
+        <summary>1. Dataset Metadata</summary>
+        <div class="step-body two-col">
+          <label>
+            Dataset name <span class="help" title="Human-readable dataset name used in metadata.">?</span>
+            <input id="dataset_name" value="Dataset generated with templated generator">
+          </label>
+          <label>
+            Output directory <span class="help" title="Path is resolved relative to the TOML file in gen_configs/.">?</span>
+            <input id="generation_output_dir" value="../raw_data/new_dataset">
+          </label>
+          <label>
+            Authors <span class="help" title="One author per line.">?</span>
+            <textarea id="authors" rows="3">Your Name &lt;you@example.com&gt;</textarea>
+          </label>
+          <label>
+            Description
+            <textarea id="description" rows="3">Dataset generated using the templated generator.</textarea>
+          </label>
+          <label>
+            Logging steps
+            <input id="generation_logging_steps" type="number" min="1" value="100">
+          </label>
+        </div>
+      </details>
+
+      <details class="guide-step" open>
+        <summary>2. Source Datasets</summary>
+        <p class="muted">Each source is a HuggingFace dataset entry. Preview a source to populate alias column autocomplete.</p>
+        <div id="source-list"></div>
+        <button type="button" onclick="addSource()">Add Source</button>
+      </details>
+
+      <details class="guide-step" open>
+        <summary>3. Models</summary>
+        <p class="muted">Select reusable models from settings, add custom models, then choose the default model.</p>
+        <div class="settings-models">
+          <h3>Settings Models</h3>
+          {% for model_name, model in settings.models.items() %}
+            <label class="check-row">
+              <input type="checkbox" class="settings-model" value="{{ model_name }}" data-backend="{{ model.get('backend', '') }}">
+              <span>{{ model_name }} · {{ model.get('backend', '') }}</span>
+            </label>
+          {% else %}
+            <p class="muted">No settings models yet. Add reusable models in Settings or define a custom model below.</p>
+          {% endfor %}
+        </div>
+        <div id="custom-model-list"></div>
+        <div class="actions">
+          <button type="button" onclick="addCustomModel()">Add Custom Model</button>
+          <button type="button" onclick="refreshModelOptions()">Refresh Model Choices</button>
+        </div>
+        <label class="compact-label">
+          Default model <span class="help" title="Used by all source datasets unless a source dataset overrides it.">?</span>
+          <select id="default_model"></select>
+        </label>
+      </details>
+
+      <details class="guide-step" open>
+        <summary>4. Prompting And Output</summary>
+        <div class="two-col">
+          <label>
+            Default system prompt <span class="help" title="Required unless every source dataset supplies its own system prompt.">?</span>
+            <textarea id="default_system_prompt" rows="8">You are a helpful assistant.</textarea>
+          </label>
+          <label>
+            Default prompt template <span class="help" title="Jinja template rendered with input as the source row. Example: {% raw %}{{ input.text }}{% endraw %}">?</span>
+            <textarea class="code" id="default_prompt_template" rows="8">Generate a response for: {% raw %}{{ input.text }}{% endraw %}</textarea>
+          </label>
+        </div>
+        <label>
+          Output template <span class="help" title="Jinja template rendered with input and llm_output. JSON-looking output is parsed as JSONL rows.">?</span>
+          <textarea class="code" id="output_template" rows="7">{
+  "input": "{% raw %}{{ input.text }}{% endraw %}",
+  "output": "{% raw %}{{ llm_output }}{% endraw %}"
+}</textarea>
+        </label>
+        <label>
+          Structured output schema <span class="help" title="Optional Pydantic BaseModel class. The first BaseModel subclass is passed to OpenAI parse().">?</span>
+          <textarea class="code" id="structured_output_schema" rows="8" placeholder="from pydantic import Field&#10;&#10;class Response(BaseModel):&#10;    answer: str = Field(description='...')"></textarea>
+        </label>
+      </details>
+
+      <details class="guide-step" open>
+        <summary>5. Per-Source Generator Settings</summary>
+        <p class="muted">Add one processing rule per source. Per-source prompts/models override defaults.</p>
+        <div id="source-dataset-list"></div>
+        <button type="button" onclick="addSourceDataset()">Add Source Rule</button>
+      </details>
+
+      <details class="guide-step">
+        <summary>6. Curator Metadata</summary>
+        <div class="two-col">
+          <label>
+            Upload repo id
+            <input id="upload_repo_id" placeholder="username/dataset-name">
+          </label>
+          <label>
+            License
+            <input id="license" value="mit">
+          </label>
+          <label>
+            Languages <span class="help" title="One language code per line.">?</span>
+            <textarea id="language" rows="3">en</textarea>
+          </label>
+          <label>
+            Task categories <span class="help" title="One HuggingFace task category per line.">?</span>
+            <textarea id="task_categories" rows="3"></textarea>
+          </label>
+          <label>
+            Task ids
+            <textarea id="task_ids" rows="3"></textarea>
+          </label>
+          <label>
+            Citation BibTeX
+            <textarea id="citation_bibtex" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="checks">
+          <label><input id="upload_to_hf" type="checkbox"> Upload after generation</label>
+          <label><input id="update_card" type="checkbox" checked> Update dataset card</label>
+          <label><input id="train_test_split" type="checkbox" checked> Train/test split</label>
+        </div>
+      </details>
+    </div>
+
+    <aside class="builder-side panel">
+      <h2>{{ 'Edit' if existing_name else 'Create' }}</h2>
+      <form hx-post="{{ preview_url }}" hx-target="#builder-result" hx-swap="innerHTML" onsubmit="return prepareBuilderPayload()">
+        <input type="hidden" name="config_json" class="builder-payload">
+        <button type="submit">Preview TOML</button>
+      </form>
+      <form hx-post="{{ save_url }}" hx-target="#builder-result" hx-swap="innerHTML" onsubmit="return prepareBuilderPayload()">
+        {% if existing_name %}
+          <p class="muted">Saving back to {{ existing_name }}.</p>
+        {% else %}
+          <label>
+            File name <span class="help" title="Saved under gen_configs/. The .toml suffix is added if omitted.">?</span>
+            <input name="name" value="new_dataset.toml">
+          </label>
+        {% endif %}
+        <input type="hidden" name="config_json" class="builder-payload">
+        {% if not existing_name %}
+          <label class="check-row"><input type="checkbox" name="overwrite" value="true"> overwrite existing</label>
+        {% endif %}
+        <button type="submit">{{ 'Save Config' if existing_name else 'Create Config' }}</button>
+      </form>
+      <div id="builder-result"></div>
+    </aside>
+  </div>
+</section>
+
+<script>
+const settingsModels = {{ settings.models | tojson }};
+const initialPayload = {{ initial_payload | tojson }};
+let sourceId = 0;
+let customModelId = 0;
+let sourceDatasetId = 0;
+let aliasRowId = 0;
+
+function lines(id) {
+  return document.getElementById(id).value.split(/\n+/).map(v => v.trim()).filter(Boolean);
+}
+
+function card(template) {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = template.trim();
+  return wrapper.firstElementChild;
+}
+
+function removeParent(button, selector) {
+  button.closest(selector).remove();
+  refreshSourceOptions();
+  refreshModelOptions();
+}
+
+function htmlEscape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  }[char]));
+}
+
+function setActiveButton(button) {
+  button.parentElement.querySelectorAll("button").forEach(item => item.classList.remove("active"));
+  button.classList.add("active");
+}
+
+function showSourceCardTab(button, tabName) {
+  const sourceCard = button.closest(".source-card");
+  setActiveButton(button);
+  sourceCard.querySelectorAll(".source-card-panel").forEach(panel => panel.classList.remove("active"));
+  sourceCard.querySelector(`.source-${tabName}-panel`).classList.add("active");
+}
+
+function showSourceCardTabByName(sourceCard, tabName) {
+  const button = sourceCard.querySelector(`.source-card-tabs button[data-tab="${tabName}"]`);
+  if (button) showSourceCardTab(button, tabName);
+}
+
+function showPreviewTab(button, tabName) {
+  const container = button.closest(".preview-tabs-container");
+  setActiveButton(button);
+  container.querySelectorAll(".preview-tab-panel").forEach(panel => panel.classList.remove("active"));
+  container.querySelector(`.${tabName}-panel`).classList.add("active");
+}
+
+function addSource(values = {}) {
+  sourceId += 1;
+  const domId = `source-${sourceId}`;
+  const node = card(`
+    <article class="mini-card source-card" data-source-dom-id="${domId}">
+      <div class="section-head compact">
+        <h3>Source</h3>
+        <button class="button secondary" type="button" onclick="removeParent(this, '.source-card')">Remove</button>
+      </div>
+      <div class="tab-buttons source-card-tabs">
+        <button class="active" data-tab="form" type="button" onclick="showSourceCardTab(this, 'form')">Source</button>
+        <button data-tab="preview" type="button" onclick="showSourceCardTab(this, 'preview')">Preview</button>
+      </div>
+      <div class="source-card-panel source-form-panel active">
+        <div class="two-col">
+          <label>Name <span class="help" title="Identifier used by source rules and aliases.">?</span><input class="source-name"></label>
+          <label>HF path <input class="source-path" placeholder="sentence-transformers/all-nli"></label>
+          <label>Subset <input class="source-subset" placeholder="optional"></label>
+          <label>Split <input class="source-split"></label>
+        </div>
+        <div class="actions source-actions">
+          <button type="button" onclick="previewSource(this)">Preview Dataset</button>
+          <button class="button secondary" type="button" onclick="addAliasRow(this.closest('.source-card'))">Add Alias</button>
+        </div>
+        <datalist class="source-column-list" id="${domId}-columns"></datalist>
+        <div class="source-aliases"></div>
+      </div>
+      <div class="source-card-panel source-preview-panel">
+        <div class="source-preview-empty muted">Preview this source to inspect rows, columns, and dataset metadata.</div>
+        <div class="source-preview"></div>
+      </div>
+    </article>`);
+  document.getElementById("source-list").appendChild(node);
+  node.querySelector(".source-name").value = values.name || `source_${sourceId}`;
+  node.querySelector(".source-path").value = values.path || "";
+  node.querySelector(".source-subset").value = values.subset || "";
+  node.querySelector(".source-split").value = values.split || "train";
+  refreshSourceOptions();
+}
+
+function addAliasRow(sourceCard, values = {}) {
+  aliasRowId += 1;
+  const listId = `${sourceCard.dataset.sourceDomId}-columns`;
+  const node = card(`
+    <div class="alias-row source-alias-row">
+      <label>
+        Template alias <span class="help" title='Alias used in templates, for example text in {% raw %}{{ input.text }}{% endraw %}.'>?</span>
+        <input class="alias-name" placeholder="text">
+      </label>
+      <label>
+        Source column <span class="help" title="Preview the dataset to populate autocomplete.">?</span>
+        <input class="alias-column" list="${listId}" placeholder="dataset column">
+      </label>
+      <button class="button secondary" type="button" onclick="this.closest('.alias-row').remove()">Remove</button>
+    </div>`);
+  sourceCard.querySelector(".source-aliases").appendChild(node);
+  node.querySelector(".alias-name").value = values.alias || "";
+  node.querySelector(".alias-column").value = values.column || "";
+}
+
+async function previewSource(button) {
+  const sourceCard = button.closest(".source-card");
+  const result = sourceCard.querySelector(".source-preview");
+  const params = new URLSearchParams();
+  params.set("path", sourceCard.querySelector(".source-path").value);
+  params.set("subset", sourceCard.querySelector(".source-subset").value);
+  params.set("split", sourceCard.querySelector(".source-split").value || "train");
+  params.set("source_dom_id", sourceCard.dataset.sourceDomId);
+  result.innerHTML = '<div class="notice">Loading dataset preview...</div>';
+  const response = await fetch("/sources/preview", {
+    method: "POST",
+    headers: {"Content-Type": "application/x-www-form-urlencoded"},
+    body: params
+  });
+  result.innerHTML = await response.text();
+  const notice = result.querySelector("[data-source-columns]");
+  if (notice) {
+    const columns = notice.dataset.sourceColumns.split(",").map(value => value.trim()).filter(Boolean);
+    updateSourceColumns(sourceCard.dataset.sourceDomId, columns);
+  }
+  sourceCard.querySelector(".source-preview-empty").style.display = "none";
+  showSourceCardTabByName(sourceCard, "preview");
+}
+
+function updateSourceColumns(sourceDomId, columns) {
+  const sourceCard = document.querySelector(`[data-source-dom-id="${sourceDomId}"]`);
+  if (!sourceCard) return;
+  const datalist = sourceCard.querySelector(".source-column-list");
+  datalist.innerHTML = columns.map(column => `<option value="${htmlEscape(column)}"></option>`).join("");
+  sourceCard.dataset.columns = JSON.stringify(columns);
+}
+
+function addCustomModel(values = {}) {
+  customModelId += 1;
+  const params = typeof values.params === "string" ? values.params : JSON.stringify(values.params || {
+    model: "gpt-4.1-mini",
+    temperature: 0.3,
+    max_tokens: 1000
+  }, null, 2);
+  const node = card(`
+    <article class="mini-card custom-model-card">
+      <div class="section-head compact">
+        <h3>Custom Model</h3>
+        <button class="button secondary" type="button" onclick="removeParent(this, '.custom-model-card')">Remove</button>
+      </div>
+      <div class="two-col">
+        <label>Name <input class="custom-model-name"></label>
+        <label>Backend <select class="custom-model-backend"><option value="openai">openai</option><option value="dummy">dummy</option></select></label>
+      </div>
+      <label>Params JSON <span class="help" title="For openai, include model and optional temperature/max_tokens/api_base/api_key. For dummy, include response.">?</span>
+        <textarea class="code custom-model-params" rows="6"></textarea>
+      </label>
+    </article>`);
+  document.getElementById("custom-model-list").appendChild(node);
+  node.querySelector(".custom-model-name").value = values.name || `custom_model_${customModelId}`;
+  node.querySelector(".custom-model-backend").value = values.backend || "openai";
+  node.querySelector(".custom-model-params").value = params;
+  refreshModelOptions();
+}
+
+function addSourceDataset(values = {}) {
+  sourceDatasetId += 1;
+  const node = card(`
+    <article class="mini-card source-dataset-card">
+      <div class="section-head compact">
+        <h3>Source Rule</h3>
+        <button class="button secondary" type="button" onclick="removeParent(this, '.source-dataset-card')">Remove</button>
+      </div>
+      <div class="two-col">
+        <label>Source <select class="source-dataset-name source-select"></select></label>
+        <label>Model override <select class="source-dataset-model model-select"><option value="">Use default model</option></select></label>
+        <label>Max records <input class="source-dataset-max-records" type="number" min="1"></label>
+        <label>Max failures <input class="source-dataset-max-failures" type="number" min="0" step="0.05"></label>
+      </div>
+      <div class="checks"><label><input class="source-dataset-shuffle" type="checkbox"> Shuffle before selecting records</label></div>
+      <label>System prompt override <textarea class="source-dataset-system-prompt" rows="4" placeholder="Leave blank to use default system prompt."></textarea></label>
+      <label>Prompt template override <textarea class="code source-dataset-prompt-template" rows="5" placeholder="Leave blank to use default prompt template."></textarea></label>
+    </article>`);
+  document.getElementById("source-dataset-list").appendChild(node);
+  refreshSourceOptions();
+  refreshModelOptions();
+  node.querySelector(".source-dataset-name").value = values.name || sourceNames()[0] || "";
+  node.querySelector(".source-dataset-model").value = values.model || "";
+  node.querySelector(".source-dataset-max-records").value = values.max_records || 100;
+  node.querySelector(".source-dataset-max-failures").value = values.max_failures || 0.5;
+  node.querySelector(".source-dataset-shuffle").checked = Boolean(values.shuffle);
+  node.querySelector(".source-dataset-system-prompt").value = values.system_prompt || "";
+  node.querySelector(".source-dataset-prompt-template").value = values.prompt_template || "";
+}
+
+function sourceNames() {
+  return Array.from(document.querySelectorAll(".source-card")).map(card => card.querySelector(".source-name").value.trim()).filter(Boolean);
+}
+
+function modelNames() {
+  const selected = Array.from(document.querySelectorAll(".settings-model:checked")).map(input => input.value);
+  const custom = Array.from(document.querySelectorAll(".custom-model-card")).map(card => card.querySelector(".custom-model-name").value.trim()).filter(Boolean);
+  return [...selected, ...custom];
+}
+
+function refreshSourceOptions() {
+  const names = sourceNames();
+  document.querySelectorAll(".source-select").forEach(select => {
+    const current = select.value;
+    select.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join("");
+    if (names.includes(current)) select.value = current;
+  });
+}
+
+function refreshModelOptions() {
+  const names = modelNames();
+  const defaultModel = document.getElementById("default_model");
+  const currentDefault = defaultModel.value;
+  defaultModel.innerHTML = names.map(name => `<option value="${name}">${name}</option>`).join("");
+  if (names.includes(currentDefault)) defaultModel.value = currentDefault;
+  document.querySelectorAll(".model-select").forEach(select => {
+    const current = select.value;
+    select.innerHTML = `<option value="">Use default model</option>` + names.map(name => `<option value="${name}">${name}</option>`).join("");
+    if (names.includes(current)) select.value = current;
+  });
+}
+
+function collectModels() {
+  const models = Array.from(document.querySelectorAll(".settings-model:checked")).map(input => ({
+    kind: "settings",
+    name: input.value
+  }));
+  document.querySelectorAll(".custom-model-card").forEach(card => {
+    models.push({
+      kind: "custom",
+      name: card.querySelector(".custom-model-name").value.trim(),
+      backend: card.querySelector(".custom-model-backend").value,
+      params: card.querySelector(".custom-model-params").value
+    });
+  });
+  return models;
+}
+
+function collectPayload() {
+  const aliases = [];
+  document.querySelectorAll(".source-card").forEach(card => {
+    const source = card.querySelector(".source-name").value.trim();
+    const column_map = {};
+    card.querySelectorAll(".source-alias-row").forEach(row => {
+      const alias = row.querySelector(".alias-name").value.trim();
+      const column = row.querySelector(".alias-column").value.trim();
+      if (alias && column) column_map[alias] = column;
+    });
+    if (Object.keys(column_map).length) aliases.push({source, column_map});
+  });
+
+  return {
+    dataset_name: document.getElementById("dataset_name").value,
+    description: document.getElementById("description").value,
+    authors: lines("authors"),
+    generation_output_dir: document.getElementById("generation_output_dir").value,
+    generation_logging_steps: document.getElementById("generation_logging_steps").value,
+    sources: Array.from(document.querySelectorAll(".source-card")).map(card => ({
+      name: card.querySelector(".source-name").value,
+      path: card.querySelector(".source-path").value,
+      subset: card.querySelector(".source-subset").value,
+      split: card.querySelector(".source-split").value
+    })),
+    models: collectModels(),
+    default_model: document.getElementById("default_model").value,
+    default_system_prompt: document.getElementById("default_system_prompt").value,
+    default_prompt_template: document.getElementById("default_prompt_template").value,
+    output_template: document.getElementById("output_template").value,
+    structured_output_schema: document.getElementById("structured_output_schema").value,
+    source_datasets: Array.from(document.querySelectorAll(".source-dataset-card")).map(card => ({
+      name: card.querySelector(".source-dataset-name").value,
+      model: card.querySelector(".source-dataset-model").value,
+      max_records: card.querySelector(".source-dataset-max-records").value,
+      max_failures: card.querySelector(".source-dataset-max-failures").value,
+      shuffle: card.querySelector(".source-dataset-shuffle").checked,
+      system_prompt: card.querySelector(".source-dataset-system-prompt").value,
+      prompt_template: card.querySelector(".source-dataset-prompt-template").value
+    })),
+    aliases,
+    curator: {
+      upload_to_hf: document.getElementById("upload_to_hf").checked,
+      upload_repo_id: document.getElementById("upload_repo_id").value,
+      train_test_split: document.getElementById("train_test_split").checked,
+      update_card: document.getElementById("update_card").checked,
+      language: lines("language"),
+      license: document.getElementById("license").value,
+      task_categories: lines("task_categories"),
+      task_ids: lines("task_ids"),
+      citation_bibtex: document.getElementById("citation_bibtex").value
+    }
+  };
+}
+
+function prepareBuilderPayload() {
+  try {
+    refreshSourceOptions();
+    refreshModelOptions();
+    const payload = JSON.stringify(collectPayload());
+    document.querySelectorAll(".builder-payload").forEach(input => input.value = payload);
+    return true;
+  } catch (error) {
+    document.getElementById("builder-result").innerHTML = `<div class="notice error">${error.message}</div>`;
+    return false;
+  }
+}
+
+document.addEventListener("input", event => {
+  if (event.target.matches(".source-name")) refreshSourceOptions();
+  if (event.target.matches(".custom-model-name")) refreshModelOptions();
+});
+document.addEventListener("change", event => {
+  if (event.target.matches(".settings-model")) refreshModelOptions();
+});
+
+function setText(id, value) {
+  document.getElementById(id).value = Array.isArray(value) ? value.join("\n") : (value || "");
+}
+
+function hydrate(payload) {
+  document.getElementById("source-list").innerHTML = "";
+  document.getElementById("custom-model-list").innerHTML = "";
+  document.getElementById("source-dataset-list").innerHTML = "";
+
+  setText("dataset_name", payload.dataset_name);
+  setText("description", payload.description);
+  setText("authors", payload.authors);
+  setText("generation_output_dir", payload.generation_output_dir);
+  setText("generation_logging_steps", payload.generation_logging_steps || 100);
+  setText("default_system_prompt", payload.default_system_prompt);
+  setText("default_prompt_template", payload.default_prompt_template);
+  setText("output_template", payload.output_template);
+  setText("structured_output_schema", payload.structured_output_schema);
+
+  (payload.sources || []).forEach(addSource);
+  (payload.aliases || []).forEach(alias => {
+    const sourceCard = Array.from(document.querySelectorAll(".source-card")).find(card => card.querySelector(".source-name").value === alias.source);
+    if (!sourceCard) return;
+    Object.entries(alias.column_map || {}).forEach(([aliasName, columnName]) => {
+      addAliasRow(sourceCard, {alias: aliasName, column: columnName});
+    });
+  });
+  (payload.models || []).forEach(model => {
+    if (model.kind === "settings") {
+      const input = document.querySelector(`.settings-model[value="${CSS.escape(model.name)}"]`);
+      if (input) input.checked = true;
+      else addCustomModel({name: model.name, backend: model.backend || "openai", params: model.params || {}});
+    } else {
+      addCustomModel(model);
+    }
+  });
+  refreshModelOptions();
+  document.getElementById("default_model").value = payload.default_model || "";
+  (payload.source_datasets || []).forEach(addSourceDataset);
+
+  const curator = payload.curator || {};
+  document.getElementById("upload_to_hf").checked = Boolean(curator.upload_to_hf);
+  document.getElementById("update_card").checked = curator.update_card !== false;
+  document.getElementById("train_test_split").checked = curator.train_test_split !== false;
+  setText("upload_repo_id", curator.upload_repo_id);
+  setText("language", curator.language);
+  setText("license", curator.license || "mit");
+  setText("task_categories", curator.task_categories);
+  setText("task_ids", curator.task_ids);
+  setText("citation_bibtex", curator.citation_bibtex);
+}
+
+if (initialPayload) {
+  hydrate(initialPayload);
+} else {
+  addSource({name: "source", split: "train"});
+  addCustomModel({name: "dummy", backend: "dummy", params: '{\n  "response": "ok"\n}'});
+  addSourceDataset();
+  refreshModelOptions();
+}
+</script>
+{% endblock %}

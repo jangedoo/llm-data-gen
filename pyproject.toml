@@ -15,6 +15,9 @@ openai = "^2.3.0"
 python-dotenv = "^1.0.1"
 tomli-w = "^1.2.0"
 jinja2 = "^3.1.6"
+fastapi = "^0.115.6"
+uvicorn = "^0.32.1"
+python-multipart = "^0.0.19"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -22,6 +25,8 @@ jupyter = "^1.0.0"
 rope = "^1.13.0"
 black = "^24.8.0"
 flake8 = "^7.1.1"
+pytest = "^8.3.4"
+httpx = "^0.28.1"
 
 [build-system]
 requires = ["poetry-core"]
