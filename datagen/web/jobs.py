@@ -116,6 +116,8 @@ class JobManager:
             assert process.stdout is not None
             for line in process.stdout:
                 job.logs.append(line.rstrip())
+                sys.stdout.write(line)
+                sys.stdout.flush()
             job.return_code = process.wait()
             if job.status == "cancelled":
                 return
