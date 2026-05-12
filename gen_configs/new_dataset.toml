@@ -10,24 +10,32 @@ generation_logging_steps = 100
 path = "jangedoo/nepalinews"
 split = "train"
 
-[models."gpt-4.1-mini"]
+[models."gemma4:e4b"]
 backend = "openai"
 
-[models."gpt-4.1-mini".params]
-model = "gpt-4.1-mini"
-temperature = 0.3
-max_tokens = 1000
+[models."gemma4:e4b".params]
+model = "gemma4:e4b"
+api_base = "http://192.168.2.222:11434/v1"
+api_key = "abc"
+
+[models."gpt-oss:20b"]
+backend = "openai"
+
+[models."gpt-oss:20b".params]
+api_base = "http://192.168.2.222:11434/v1"
+api_key = "abc"
+model = "gpt-oss:20b"
 
 [generator]
 generator = "templated"
 
 [generator.params]
-default_model = "gpt-4.1-mini"
-output_template = "{\n  \"input\": \"{{ input.title }}\",\n  \"output\": \"{{ llm_output }}\"\n}"
+default_model = "gemma4:e4b"
+output_template = "{\n  \"input\": \"{{ input.title }}\",\n  \"output\": \"{{ llm_output | tojson }}\"\n}"
 default_system_prompt = "You will be given a news article body, you must come up with a title for that article which will be used in the news website as well as printed paper."
-default_prompt_template = "article: {{ input.title }}"
+default_prompt_template = "article: {{ input.body }}"
 source_datasets = [
-    { name = "source", max_records = 100, shuffle = false, max_failures = 0.5 },
+    { name = "source", max_records = 10, shuffle = false, max_failures = 0.5 },
 ]
 
 [curator.params]
