@@ -1,0 +1,53 @@
+{% if saved %}
+  <div class="notice ok">Settings saved to {{ settings_path }}.</div>
+{% endif %}
+{% if error %}
+  <div class="notice error">{{ error }}</div>
+{% endif %}
+
+<section class="two-col">
+  <form class="panel" hx-post="/settings/models" hx-target="#settings-models" hx-swap="innerHTML">
+    <h2>Configured Models</h2>
+    <label>
+      Name
+      <input name="name" placeholder="gpt-4.1-mini">
+    </label>
+    <label>
+      Backend
+      <select name="backend">
+        <option value="openai">openai</option>
+        <option value="dummy">dummy</option>
+      </select>
+    </label>
+    <label>
+      Params JSON
+      <textarea class="code" name="params_json" rows="10">{
+  "model": "gpt-4.1-mini",
+  "temperature": 0.3,
+  "max_tokens": 1000
+}</textarea>
+    </label>
+    <button type="submit">Save Model</button>
+  </form>
+
+  <div class="panel">
+    <h2>Saved Models</h2>
+    {% for model_name, model in settings.models.items() %}
+      <article class="settings-item">
+        <div class="section-head compact">
+          <div>
+            <h3>{{ model_name }}</h3>
+            <p class="muted">{{ model.get('backend', '') }}</p>
+          </div>
+          <form hx-post="/settings/models/delete" hx-target="#settings-models" hx-swap="innerHTML">
+            <input type="hidden" name="name" value="{{ model_name }}">
+            <button class="danger" type="submit">Delete</button>
+          </form>
+        </div>
+        <pre>{{ model.get('params', {}) | tojson(indent=2) }}</pre>
+      </article>
+    {% else %}
+      <p class="muted">No reusable models configured yet.</p>
+    {% endfor %}
+  </div>
+</section>

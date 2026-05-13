@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Outputs - {{ config_name }}{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-head">
+    <div>
+      <h1>Outputs</h1>
+      <p class="muted">{{ config_name }} · {{ outputs.output_dir }}</p>
+    </div>
+    <a class="button secondary" href="/configs/{{ config_name }}">Edit Config</a>
+  </div>
+  <div class="output-list">
+    {% for file in outputs.files %}
+      <article class="panel">
+        <div class="section-head compact">
+          <h2>{{ file.name }}</h2>
+          <span class="status ok">{{ file.rows }} rows</span>
+        </div>
+        {% if file.invalid_reasons %}
+          <div class="notice error">
+            <strong>Invalid rows</strong>
+            <ul>
+              {% for reason in file.invalid_reasons %}
+                <li>{{ reason }}</li>
+              {% endfor %}
+            </ul>
+          </div>
+        {% endif %}
+        {% for row in file.preview %}
+          <pre>{{ row | tojson(indent=2) }}</pre>
+        {% endfor %}
+      </article>
+    {% else %}
+      <p class="muted">No JSONL outputs found.</p>
+    {% endfor %}
+  </div>
+  <form hx-post="/jobs/upload" hx-swap="none" class="upload">
+    <input type="hidden" name="config_name" value="{{ config_name }}">
+    <button type="submit">Upload to HuggingFace</button>
+  </form>
+</section>
+{% endblock %}

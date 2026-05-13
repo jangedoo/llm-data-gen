@@ -1,6 +1,10 @@
+import time
+from typing import Any
+
 import openai
 from pydantic import BaseModel
 
+from datagen.core.stats import CallStats
 from datagen.llm.base import LLM
 
 
@@ -26,15 +30,19 @@ class OpenAILLM(LLM):
 
         self.usage_history: list[openai.types.completion_usage.CompletionUsage] = []
 
-    def generate(
+    def _call(
         self,
         messages: list[dict],
-        response_format: dict | type[BaseModel] | None = None,
-    ) -> str | BaseModel | None:
+        response_format: dict | type[BaseModel] | None,
+    ) -> tuple[Any, openai.types.completion_usage.CompletionUsage | None]:
         if not response_format:
             response_format = {"type": "text"}
 
-        if issubclass(response_format, BaseModel):
+        is_structured_response = isinstance(response_format, type) and issubclass(
+            response_format, BaseModel
+        )
+
+        if is_structured_response:
             response = self.client.chat.completions.parse(
                 messages=messages,
                 model=self.model,
@@ -44,7 +52,6 @@ class OpenAILLM(LLM):
                 presence_penalty=self.presence_penalty,
                 top_p=self.top_p,
                 response_format=response_format,
-                reasoning_effort="none",
             )
         else:
             response = self.client.chat.completions.create(
@@ -55,15 +62,46 @@ class OpenAILLM(LLM):
                 frequency_penalty=self.frequency_penalty,
                 presence_penalty=self.presence_penalty,
                 top_p=self.top_p,
-                reasoning_effort="none",
             )
+
         if response.usage:
             self.usage_history.append(response.usage)
 
-        if issubclass(response_format, BaseModel):
-            return response.choices[0].message.parsed
+        if is_structured_response:
+            return response.choices[0].message.parsed, response.usage
+        return response.choices[0].message.content, response.usage
+
+    def generate(
+        self,
+        messages: list[dict],
+        response_format: dict | type[BaseModel] | None = None,
+    ) -> str | BaseModel | None:
+        out, _ = self._call(messages, response_format)
+        return out
+
+    def generate_with_stats(
+        self,
+        messages: list[dict],
+        response_format: dict | type[BaseModel] | None = None,
+    ) -> tuple[Any, CallStats]:
+        start = time.perf_counter()
+        out, usage = self._call(messages, response_format)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        if usage is not None:
+            stats = CallStats(
+                latency_ms=elapsed_ms,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+            )
         else:
-            return response.choices[0].message.content
+            stats = CallStats(
+                latency_ms=elapsed_ms,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
+        return out, stats
 
     def get_usage_stats(self) -> dict:
         completion_tokens = 0

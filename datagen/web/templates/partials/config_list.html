@@ -1,0 +1,32 @@
+<div class="grid">
+  {% for config in configs %}
+    <article class="config-card">
+      <div class="card-head">
+        <h2>{{ config.dataset_name }}</h2>
+        <span class="status {{ 'ok' if config.valid else 'error' }}">
+          {{ 'valid' if config.valid else 'invalid' }}
+        </span>
+      </div>
+      <p>{{ config.description }}</p>
+      <dl>
+        <div><dt>File</dt><dd>{{ config.name }}</dd></div>
+        <div><dt>Generator</dt><dd>{{ config.generator or 'missing' }}</dd></div>
+        <div><dt>Default model</dt><dd>{{ config.default_model or 'missing' }}</dd></div>
+        <div><dt>Output</dt><dd>{{ config.generation_output_dir }}</dd></div>
+      </dl>
+      {% if config.errors %}
+        <p class="error-text">{{ config.errors[0] }}</p>
+      {% endif %}
+      <div class="actions">
+        <a class="button" href="/configs/{{ config.name }}">Edit</a>
+        <a class="button secondary" href="/outputs/{{ config.name }}">Outputs</a>
+        <form hx-post="/jobs/generate" hx-swap="none" class="inline-form">
+          <input type="hidden" name="config_name" value="{{ config.name }}">
+          <button type="submit" {% if not config.valid %}disabled{% endif %}>Run</button>
+        </form>
+      </div>
+    </article>
+  {% else %}
+    <p class="muted">No TOML configs found in gen_configs/.</p>
+  {% endfor %}
+</div>

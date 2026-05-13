@@ -1,0 +1,18 @@
+{% if result.ok %}
+  <h3>{{ result.source_name }}</h3>
+  <h4>System</h4>
+  <pre>{{ result.system_prompt }}</pre>
+  <h4>Prompt</h4>
+  <pre>{{ result.prompt }}</pre>
+  <h4>Normalized Row</h4>
+  <pre>{{ result.normalized_row | tojson(indent=2) }}</pre>
+{% else %}
+  <div class="notice error">
+    <strong>Prompt render failed.</strong>
+    <ul>
+      {% for error in result.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}

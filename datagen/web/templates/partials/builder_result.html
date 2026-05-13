@@ -1,0 +1,25 @@
+{% if validation.ok %}
+  <div class="notice ok">
+    {% if created_name %}
+      Created <a href="/configs/{{ created_name }}">{{ created_name }}</a>.
+    {% elif saved_name %}
+      Saved <a href="/configs/{{ saved_name }}">{{ saved_name }}</a>.
+    {% else %}
+      Config is valid.
+    {% endif %}
+  </div>
+{% else %}
+  <div class="notice error">
+    <strong>Config is invalid.</strong>
+    <ul>
+      {% for error in validation.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
+
+{% if toml_text %}
+  <h3>Generated TOML</h3>
+  <textarea class="code" rows="20" readonly>{{ toml_text }}</textarea>
+{% endif %}

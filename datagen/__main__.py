@@ -26,13 +26,24 @@ def cli():
     required=True,
     help="Path to the TOML configuration file",
 )
-def generate(config_file: Path):
-    """Generate dataset using the specified config file"""
+@click.option(
+    "--fresh",
+    is_flag=True,
+    default=False,
+    help="Ignore any existing run_state.json and start the run from scratch.",
+)
+def generate(config_file: Path, fresh: bool):
+    """Generate dataset using the specified config file.
+
+    If a previous run was interrupted, simply rerun the same command — the
+    pipeline reads ``<output_dir>/run_state.json`` and resumes from where it
+    left off. Pass ``--fresh`` to force a clean start.
+    """
     from datagen.core.pipeline import GenerationPipeline, GenerationPipelineConfig
 
     pipeline_config = GenerationPipelineConfig.from_path(config_file)
     pipeline = GenerationPipeline(config=pipeline_config)
-    pipeline.start()
+    pipeline.start(fresh=fresh)
 
 
 @cli.command("push-to-hub")
@@ -73,6 +84,19 @@ def push_to_hub(
     pipeline.push_to_hub(
         repo_id=repo_id, commit_message=commit_message, update_card=update_card
     )
+
+
+@cli.command("web")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8000, type=int, show_default=True)
+def web(host: str, port: int):
+    """Run the local Dataset Studio web interface."""
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise click.ClickException("Dataset Studio is local-only; bind to 127.0.0.1")
+
+    import uvicorn
+
+    uvicorn.run("datagen.web:create_app", factory=True, host=host, port=port)
 
 
 @cli.command("generate-config")

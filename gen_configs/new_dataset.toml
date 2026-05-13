@@ -1,0 +1,50 @@
+dataset_name = "Dataset generated with templated generator"
+description = "Dataset generated using the templated generator."
+authors = [
+    "Your Name <you@example.com>",
+]
+generation_output_dir = "../raw_data/new_dataset"
+generation_logging_steps = 100
+
+[sources.source]
+path = "jangedoo/nepalinews"
+split = "train"
+
+[models."gemma4:e4b"]
+backend = "openai"
+
+[models."gemma4:e4b".params]
+model = "gemma4:e4b"
+api_base = "http://192.168.2.222:11434/v1"
+api_key = "abc"
+
+[models."gpt-oss:20b"]
+backend = "openai"
+
+[models."gpt-oss:20b".params]
+api_base = "http://192.168.2.222:11434/v1"
+api_key = "abc"
+model = "gpt-oss:20b"
+
+[generator]
+generator = "templated"
+
+[generator.params]
+default_model = "gemma4:e4b"
+output_template = "{\n  \"input\": \"{{ input.title }}\",\n  \"output\": \"{{ llm_output | tojson }}\"\n}"
+default_system_prompt = "You will be given a news article body, you must come up with a title for that article which will be used in the news website as well as printed paper."
+default_prompt_template = "article: {{ input.body }}"
+source_datasets = [
+    { name = "source", max_records = 10, shuffle = false, max_failures = 0.5 },
+]
+
+[curator.params]
+upload_to_hf = false
+train_test_split = true
+update_card = true
+language = [
+    "en",
+]
+license = "mit"
+task_categories = []
+task_ids = []

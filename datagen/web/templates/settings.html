@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<section class="section">
+  <div class="section-head">
+    <div>
+      <h1>Settings</h1>
+      <p class="muted">Stored at {{ settings_path }}</p>
+    </div>
+  </div>
+  <div id="settings-models">
+    {% include "partials/settings_models.html" %}
+  </div>
+</section>
+{% endblock %}

@@ -1,10 +1,11 @@
 import json
 import re
-from typing import Any, Dict, Iterator, List, Optional, Set
-from datasets.arrow_dataset import Dataset
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
+
 from pydantic import BaseModel
-from dataclasses import dataclass
 from jinja2 import Environment, Template, TemplateSyntaxError
+
 from datagen.core import (
     BaseGeneratorConfig,
     BaseGenerator,
@@ -254,6 +255,11 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
             default_system_prompt: str | None,
             aliases: dict[str, str] | None = None,
         ):
+            max_records = src_ds.get("max_records")
+            if max_records is not None:
+                max_records = int(max_records)
+                if max_records <= 0:
+                    max_records = None
             return TemplatedDatasetConfig(
                 source_name=src_ds["name"],
                 source_config=sources_config[src_ds["name"]],
@@ -261,7 +267,7 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                 model_config=models_config[model_name],
                 system_prompt=src_ds.get("system_prompt", default_system_prompt),
                 prompt_template=src_ds.get("prompt_template", None),
-                max_records=src_ds.get("max_records", 100),
+                max_records=max_records,
                 shuffle=src_ds.get("shuffle", False),
                 max_failures=src_ds.get("max_failures", 0.5),
                 aliases=aliases,
@@ -359,7 +365,12 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
             }
 
     def process_dataset(
-        self, ds: Dataset, ds_config: TemplatedDatasetConfig, llm: LLM
+        self,
+        rows: Iterable[Dict[str, Any]],
+        ds_config: TemplatedDatasetConfig,
+        llm: LLM,
+        dataset_length: Optional[int] = None,
+        start_offset: int = 0,
     ) -> Iterator[Dict[str, Any]]:
         total_failures = 0
         max_failures = ds_config.max_failures
@@ -372,7 +383,9 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                 f"No prompt template available for dataset {ds_config.source_name}"
             )
 
-        for row in ds:
+        for local_idx, row in enumerate(rows):
+            input_index = start_offset + local_idx
+            call_stats = None
             try:
                 # Apply aliases to normalize the row data
                 row_dict = dict(row)  # Convert to Dict[str, Any]
@@ -392,11 +405,11 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                     system_prompt=ds_config.system_prompt, content=prompt
                 )
 
-                # Generate response from LLM
+                # Generate response (with per-call stats) from LLM
                 structured_output_cls = getattr(
                     self.config, "structured_output_cls", None
                 )
-                llm_response = llm.generate(
+                llm_response, call_stats = llm.generate_with_stats(
                     messages=messages,
                     response_format=structured_output_cls,
                 )
@@ -404,13 +417,17 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                 # Format the output
                 result = self._format_output(normalized_row, llm_response, ds_config)
 
-                # Ensure __meta exists
+                # Ensure __meta exists with stats + input_index
                 if "__meta" not in result:
                     result["__meta"] = {
                         "dataset_name": ds_config.source_name,
                         "is_valid": True,
                         "reason": "",
                     }
+                result["__meta"]["input_index"] = input_index
+                result["__meta"]["stats"] = (
+                    asdict(call_stats) if call_stats is not None else None
+                )
 
                 yield result
 
@@ -421,7 +438,7 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                     ds_config=ds_config,
                     total_failures=total_failures,
                     max_failures=max_failures,
-                    dataset_length=len(ds),
+                    dataset_length=dataset_length,
                 )
 
                 yield {
@@ -431,6 +448,8 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                         "dataset_name": ds_config.source_name,
                         "is_valid": False,
                         "reason": str(e),
+                        "input_index": input_index,
+                        "stats": asdict(call_stats) if call_stats is not None else None,
                     },
                 }
 

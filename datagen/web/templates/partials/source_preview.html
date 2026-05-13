@@ -1,0 +1,86 @@
+{% if preview.ok %}
+  <div class="notice ok" data-source-columns="{{ preview.columns | join(',') }}">
+    Loaded {{ preview.rows | length }} sample rows. Columns: {{ preview.columns | join(', ') }}
+  </div>
+  {% if source_dom_id %}
+    <script>
+      updateSourceColumns("{{ source_dom_id }}", {{ preview.columns | tojson }});
+    </script>
+  {% endif %}
+
+  <div class="preview-tabs-container">
+    <div class="tab-buttons preview-tabs">
+      <button class="active" type="button" onclick="showPreviewTab(this, 'rows')">Rows</button>
+      <button type="button" onclick="showPreviewTab(this, 'columns')">Columns</button>
+      <button type="button" onclick="showPreviewTab(this, 'metadata')">Dataset Meta</button>
+    </div>
+
+    <div class="preview-tab-panel rows-panel active">
+      <div class="table-wrap">
+        <table class="preview-table">
+          <thead>
+            <tr>
+              {% for column in preview.columns %}
+                <th>{{ column }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in preview.table_rows %}
+              <tr>
+                {% for column in preview.columns %}
+                  <td title="{{ row[column].full }}">{{ row[column].display }}</td>
+                {% endfor %}
+              </tr>
+            {% else %}
+              <tr><td class="muted" colspan="{{ preview.columns | length or 1 }}">No rows returned.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="preview-tab-panel columns-panel">
+      <div class="table-wrap">
+        <table class="preview-table">
+          <thead>
+            <tr>
+              <th>Column</th>
+              <th>Type</th>
+              <th>Feature</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for column in preview.column_metadata %}
+              <tr>
+                <td>{{ column.name }}</td>
+                <td>{{ column.type }}</td>
+                <td title="{{ column.feature }}">{{ column.feature }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="preview-tab-panel metadata-panel">
+      <dl class="metadata-list">
+        {% for key, value in preview.dataset_metadata.items() %}
+          <div>
+            <dt>{{ key }}</dt>
+            <dd title="{{ value }}">{{ value }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+    </div>
+  </div>
+{% else %}
+  <div class="notice error">
+    <strong>Dataset preview failed.</strong>
+    <ul>
+      {% for error in preview.errors %}
+        <li>{{ error }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
