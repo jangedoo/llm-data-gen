@@ -30,9 +30,13 @@ class HFDataSourceConfig(DataSourceConfig):
     path: str
     subset: str | None = None
     split: str = "train"
+    streaming: bool = False
 
-    def create_dataset(self) -> datasets.Dataset:
-        return datasets.load_dataset(self.path, self.subset, split=self.split)  # type: ignore
+    def create_dataset(self):
+        # Returns Dataset when streaming=False, IterableDataset when True.
+        return datasets.load_dataset(
+            self.path, self.subset, split=self.split, streaming=self.streaming
+        )  # type: ignore
 
     @classmethod
     def from_config(cls, source_config: dict):
@@ -41,7 +45,8 @@ class HFDataSourceConfig(DataSourceConfig):
         hf_path = source_config["path"]
         subset = source_config.get("subset")
         split = source_config.get("split", "train")
-        return cls(path=hf_path, subset=subset, split=split)
+        streaming = bool(source_config.get("streaming", False))
+        return cls(path=hf_path, subset=subset, split=split, streaming=streaming)
 
 
 @dataclass
@@ -165,7 +170,7 @@ class DataSetConfig:
     model_name: str
     model_config: ModelConfig
     system_prompt: str
-    max_records: int
+    max_records: int | None
     shuffle: bool
     max_failures: float | int
 
@@ -209,6 +214,13 @@ class CuratorConfig:
     task_categories: list = field(default_factory=list)
     task_ids: list = field(default_factory=list)
     citation_bibtex: str = ""
+    # Periodically push the growing dataset (as a single 'train' split) to the
+    # HF Hub every ``upload_every_n_rows`` valid rows. Required for long runs
+    # where losing all progress on crash is unacceptable. When True,
+    # train_test_split must be False (splits over a growing dataset are
+    # unstable across uploads).
+    incremental_upload: bool = False
+    upload_every_n_rows: int = 1000
 
 
 @dataclass
@@ -303,9 +315,25 @@ class GenerationPipelineConfig:
             task_categories=curator_data.get("task_categories"),
             task_ids=curator_data.get("task_ids"),
             citation_bibtex=curator_data.get("citation_bibtex"),
+            incremental_upload=curator_data.get("incremental_upload", False),
+            upload_every_n_rows=int(curator_data.get("upload_every_n_rows", 1000)),
         )
         if curator_config.upload_to_hf and not curator_config.upload_repo_id:
             raise ValueError(f"`upload_to_hf` is True but no `upload_repo_id` defined.")
+        if curator_config.incremental_upload:
+            if not curator_config.upload_to_hf:
+                raise ValueError(
+                    "`incremental_upload` is True but `upload_to_hf` is False. "
+                    "Set both to True to enable periodic uploads."
+                )
+            if curator_config.train_test_split:
+                raise ValueError(
+                    "`incremental_upload` is True but `train_test_split` is also True. "
+                    "Splits over a growing dataset are unstable across uploads; "
+                    "set `train_test_split = false` when using incremental uploads."
+                )
+        if curator_config.upload_every_n_rows < 1:
+            raise ValueError("`upload_every_n_rows` must be >= 1")
         return cls(
             authors=authors,
             generation_output_dir=generation_output_dir,
@@ -317,8 +345,16 @@ class GenerationPipelineConfig:
             curator_config=curator_config,
         )
 
-    def create_hf_dataset_card(self):
+    def create_hf_dataset_card(self, aggregate: dict | None = None):
         from huggingface_hub import DatasetCard, DatasetCardData
+
+        description = (
+            self.description
+            + "\nThis dataset was automatically generated using "
+            "[llm-data-gen](https://github.com/jangedoo/llm-data-gen) library"
+        )
+        if aggregate:
+            description += "\n\n" + _format_generation_stats_section(aggregate)
 
         card_data = DatasetCardData(
             language=self.curator_config.language,
@@ -333,10 +369,30 @@ class GenerationPipelineConfig:
                 if isinstance(c, HFDataSourceConfig)
             ],
             curators=self.authors,
-            dataset_description=self.description
-            + "\nThis dataset was automatically generated using [llm-data-gen](https://github.com/jangedoo/llm-data-gen) library",
+            dataset_description=description,
             citation_bibtex=self.curator_config.citation_bibtex,
             dataset_card_authors=self.authors,
         )
         card = DatasetCard.from_template(card_data=card_data)
         return card
+
+
+def _format_generation_stats_section(aggregate: dict) -> str:
+    totals = aggregate.get("totals", {}) or {}
+    rows = int(totals.get("rows", 0))
+    valid = int(totals.get("valid", 0))
+    invalid = int(totals.get("invalid", 0))
+    total_tokens = int(totals.get("total_tokens", 0))
+    sessions = int(aggregate.get("total_sessions", 0))
+    runs = int(aggregate.get("total_runs", 0))
+    first = (aggregate.get("first_session_at") or "")[:10] or "n/a"
+    last = (aggregate.get("last_session_at") or "")[:10] or "n/a"
+    return (
+        "## Generation Stats\n\n"
+        f"- **Total rows:** {rows:,}\n"
+        f"- **Valid / Invalid:** {valid:,} / {invalid:,}\n"
+        f"- **Total tokens:** {total_tokens:,}\n"
+        f"- **Generated across {sessions} session(s) over {runs} run(s)**\n"
+        f"- **First session:** {first}\n"
+        f"- **Last session:** {last}"
+    )

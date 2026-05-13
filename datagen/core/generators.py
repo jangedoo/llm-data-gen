@@ -1,21 +1,20 @@
 import abc
-import json
+import itertools
 import logging
-import re
 from typing import (
     Generic,
     TypeVar,
     Dict,
     Any,
+    Iterable,
     List,
     Optional,
     Union,
     Iterator,
 )
-from dataclasses import dataclass
 
 import datasets
-from pydantic import BaseModel
+from pydantic import BaseModel  # noqa: F401  (re-exported usage by subclasses)
 
 from datagen.core.gen_config import (
     DataSetConfig,
@@ -134,17 +133,63 @@ class BaseGenerator(Generic[DatasetConfigT], abc.ABC):
         self._llms[llm_key] = llm
         return llm
 
-    def get_dataset(self, ds_config: DatasetConfigT) -> datasets.Dataset:
+    def get_dataset(
+        self,
+        ds_config: DatasetConfigT,
+        start_offset: int = 0,
+    ) -> tuple[Iterable[Dict[str, Any]], Optional[int]]:
+        """Return ``(rows_iterable, total_length_or_none)``.
+
+        ``total_length_or_none`` is None for streaming sources (length unknown).
+        ``start_offset`` is applied so callers consume rows starting at that
+        original-dataset index — used to resume mid-run.
+        """
         logger.info(f"Processing dataset {ds_config.source_name}")
         ds = ds_config.source_config.create_dataset()
+        is_streaming = isinstance(ds, datasets.IterableDataset)
+
+        if is_streaming:
+            if ds_config.shuffle:
+                raise ValueError(
+                    f"`shuffle=true` is not supported for streaming source "
+                    f"'{ds_config.source_name}'. Disable shuffle or set "
+                    f"`streaming=false` on the source."
+                )
+            stop = (
+                start_offset + ds_config.max_records
+                if ds_config.max_records is not None
+                else None
+            )
+            rows: Iterable[Dict[str, Any]] = itertools.islice(
+                ds, start_offset, stop
+            )
+            logger.info(
+                f"Dataset ready (streaming). Resuming from offset {start_offset}; "
+                f"max_records={ds_config.max_records}."
+            )
+            return rows, None
+
         if ds_config.shuffle:
             logger.info("Shuffling dataset")
             ds = ds.shuffle(seed=10)
-        ds = ds.select(range(ds_config.max_records))
-        logger.info(
-            f"Dataset ready for processing. {len(ds)} records will be processed."
+        full_len = len(ds)
+        end = (
+            min(start_offset + ds_config.max_records, full_len)
+            if ds_config.max_records is not None
+            else full_len
         )
-        return ds
+        if start_offset >= end:
+            logger.info(
+                f"Dataset {ds_config.source_name} already fully processed "
+                f"(offset={start_offset}, end={end}). Skipping."
+            )
+            return [], 0
+        ds = ds.select(range(start_offset, end))
+        logger.info(
+            f"Dataset ready. {len(ds)} records will be processed "
+            f"(start_offset={start_offset}, full_len={full_len})."
+        )
+        return ds, len(ds)
 
     def _create_messages(
         self, system_prompt: str, content: str
@@ -161,7 +206,7 @@ class BaseGenerator(Generic[DatasetConfigT], abc.ABC):
         ds_config: DataSetConfig,
         total_failures: int,
         max_failures: Union[int, float],
-        dataset_length: int,
+        dataset_length: Optional[int],
     ) -> tuple[int, bool]:
         total_failures += 1
         logger.warning(
@@ -169,32 +214,82 @@ class BaseGenerator(Generic[DatasetConfigT], abc.ABC):
             exc_info=True,
         )
 
-        max_failures_count = (
-            max_failures
-            if isinstance(max_failures, int)
-            else int(dataset_length * max_failures)
+        if isinstance(max_failures, int):
+            max_failures_count: Optional[int] = max_failures
+        elif dataset_length is not None:
+            max_failures_count = int(dataset_length * max_failures)
+        else:
+            # Streaming source with float max_failures: cannot compute a
+            # fraction without knowing total length. Skip the cap and warn.
+            max_failures_count = None
+            if total_failures == 1:
+                logger.warning(
+                    "max_failures is a fraction but dataset length is unknown "
+                    "(streaming source). The failure cap is disabled; set "
+                    "`max_failures` to an integer to enforce a cap."
+                )
+
+        should_stop = (
+            max_failures_count is not None and total_failures >= max_failures_count
         )
-        should_stop = total_failures >= max_failures_count
 
         if should_stop:
             logger.warning(
-                f"Number of failures {total_failures} exceeded maximum allowed failures {max_failures_count}. Not processing dataset: {ds_config.source_name}"
+                f"Number of failures {total_failures} exceeded maximum allowed "
+                f"failures {max_failures_count}. Not processing dataset: "
+                f"{ds_config.source_name}"
             )
 
         return total_failures, should_stop
 
     @abc.abstractmethod
     def process_dataset(
-        self, ds: datasets.Dataset, ds_config: DatasetConfigT, llm: LLM
+        self,
+        rows: Iterable[Dict[str, Any]],
+        ds_config: DatasetConfigT,
+        llm: LLM,
+        dataset_length: Optional[int] = None,
+        start_offset: int = 0,
     ) -> Iterator[Dict[str, Any]]:
         pass
 
-    def generate(self):
+    def generate(
+        self,
+        start_offsets: Optional[Dict[str, int]] = None,
+        completed_datasets: Optional[set[str]] = None,
+        on_dataset_complete=None,
+    ):
+        """Yield rows across all configured datasets.
+
+        ``start_offsets[name]`` is the original-dataset index to resume from
+        for that dataset. ``completed_datasets`` is the set of dataset names
+        the caller already considers done (skipped entirely).
+        ``on_dataset_complete(name)`` is invoked after a dataset's rows are
+        fully yielded (used by the pipeline to mark resume state).
+        """
+        start_offsets = start_offsets or {}
+        completed_datasets = completed_datasets or set()
         for src_ds_config in self.config.source_datasets_config:
-            ds = self.get_dataset(ds_config=src_ds_config)
-            llm = self._get_llm(llm_key=src_ds_config.model_name)
-            yield from self.process_dataset(ds=ds, ds_config=src_ds_config, llm=llm)
-            logger.info(
-                f"Finished processing dataset {src_ds_config.source_name}. Total llm consumption: {llm.get_usage_stats()}"
+            name = src_ds_config.source_name
+            if name in completed_datasets:
+                logger.info(f"Dataset {name} already completed; skipping.")
+                continue
+            offset = start_offsets.get(name, 0)
+            rows, length = self.get_dataset(
+                ds_config=src_ds_config, start_offset=offset
             )
+            llm = self._get_llm(llm_key=src_ds_config.model_name)
+            yield from self.process_dataset(
+                rows=rows,
+                ds_config=src_ds_config,
+                llm=llm,
+                dataset_length=length,
+                start_offset=offset,
+            )
+            logger.info(
+                f"Finished processing dataset {src_ds_config.source_name}. "
+                f"Total llm consumption: {llm.get_usage_stats()}"
+            )
+            if on_dataset_complete is not None:
+                on_dataset_complete(name)
         logger.info("Finished processing all datasets")

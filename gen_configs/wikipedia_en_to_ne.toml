@@ -1,0 +1,73 @@
+dataset_name = "English Wikipedia translated to Nepali"
+description = "Each row is an English Wikipedia article translated into Nepali."
+authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
+
+# Output dir is also the resume root: rerun the same `datagen generate
+# --config_file ...` command after a crash and it picks up where it left off.
+generation_output_dir = "../raw_data/wikipedia_en_to_ne"
+generation_logging_steps = 100
+
+# 1. Source — streaming English Wikipedia. Streaming avoids a 20GB upfront
+# download; rows are pulled lazily and `start_offset` is applied via islice.
+[sources.wikipedia_en]
+path = "wikimedia/wikipedia"
+subset = "20231101.en"
+split = "train"
+streaming = true
+
+# 2. Model — point this at any OpenAI-compatible endpoint capable of NE output.
+[models."translator"]
+backend = "openai"
+[models."translator".params]
+model = "gpt-4.1-mini"
+temperature = 0.2
+max_tokens = 8000
+
+# 3. Generator
+[generator]
+generator = "templated"
+
+[generator.params]
+default_model = "translator"
+default_system_prompt = """\
+You are a professional English-to-Nepali translator.
+Translate the provided text into fluent, natural Nepali.
+- Preserve meaning, tone, and structure.
+- Do not add commentary, headings, or explanations.
+- Output ONLY the translated text.
+"""
+default_prompt_template = """\
+Translate the following English text to Nepali:
+
+---
+{{ input.text }}
+---
+"""
+output_template = """{
+  "title": {{ input.title | tojson }},
+  "url": {{ input.url | tojson }},
+  "english": {{ input.text | tojson }},
+  "nepali": {{ llm_output | tojson }}
+}"""
+
+# `max_records` omitted = process the entire source. Set an int (e.g. 1000)
+# for a small smoke test before kicking off the full multi-week run.
+# `max_failures` is an int because the source length is unknown (streaming).
+source_datasets = [
+    { name = "wikipedia_en", max_failures = 5000 },
+]
+
+# 4. Curator — incremental upload every 1000 valid rows so a crash never
+# loses more than the last batch. train_test_split must be false (splits over
+# a growing dataset are unstable).
+[curator.params]
+upload_to_hf = true
+upload_repo_id = "jangedoo/wikipedia-en-to-ne"
+incremental_upload = true
+upload_every_n_rows = 1000
+train_test_split = false
+update_card = true
+language = ["en", "ne"]
+license = "cc-by-sa-4.0"
+task_categories = ["translation"]
+task_ids = []
