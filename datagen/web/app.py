@@ -226,18 +226,15 @@ def create_app(
         return _save_config_builder(request, name, config_json)
 
     @app.post("/settings/models", response_class=HTMLResponse)
-    def save_model_setting(
+    async def save_model_setting(
         request: Request,
         name: str = Form(...),
-        backend: str = Form(...),
-        params_json: str = Form(default="{}"),
     ):
         try:
-            settings = app.state.settings.upsert_model(
-                name=name,
-                backend=backend,
-                params_json=params_json,
-            )
+            form = await request.form()
+            if "params_json" in form:
+                raise ValueError("Params JSON is no longer accepted; use the structured model fields")
+            settings = app.state.settings.upsert_model(name=name, fields=form)
         except ValueError as exc:
             return _render(
                 request,

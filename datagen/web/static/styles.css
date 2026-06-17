@@ -400,6 +400,12 @@ label {
   margin-bottom: 12px;
 }
 
+.label-text {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
 fieldset {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -483,6 +489,44 @@ pre {
   padding-bottom: 0;
 }
 
+.settings-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.parameter-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.credentials-grid {
+  align-items: start;
+}
+
+.backend-panel,
+.key-source-panel {
+  border-top: 1px solid var(--line);
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+.backend-panel[hidden],
+.key-source-panel[hidden] {
+  display: none;
+}
+
+.settings-summary {
+  margin-bottom: 0;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -504,6 +548,10 @@ pre {
   }
 
   .alias-row {
+    display: block;
+  }
+
+  .settings-grid {
     display: block;
   }
 }

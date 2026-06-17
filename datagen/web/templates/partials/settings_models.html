@@ -6,48 +6,240 @@
 {% endif %}
 
 <section class="two-col">
-  <form class="panel" hx-post="/settings/models" hx-target="#settings-models" hx-swap="innerHTML">
-    <h2>Configured Models</h2>
+  <form id="model-settings-form" class="panel" hx-post="/settings/models" hx-target="#settings-models" hx-swap="innerHTML">
+    <div class="section-head compact">
+      <h2>Configured Models</h2>
+      <button class="button secondary" type="button" onclick="resetModelSettingsForm()">New</button>
+    </div>
+
     <label>
-      Name
-      <input name="name" placeholder="gpt-4.1-mini">
+      <span class="label-text">Name <span class="help" title="Reusable name shown in the config builder.">?</span></span>
+      <input name="name" placeholder="gpt-4.1-mini" required>
     </label>
+
     <label>
       Backend
-      <select name="backend">
+      <select name="backend" id="settings-backend" onchange="syncModelSettingsForm()">
         <option value="openai">openai</option>
         <option value="dummy">dummy</option>
       </select>
     </label>
-    <label>
-      Params JSON
-      <textarea class="code" name="params_json" rows="10">{
-  "model": "gpt-4.1-mini",
-  "temperature": 0.3,
-  "max_tokens": 1000
-}</textarea>
-    </label>
+
+    <div class="backend-panel" data-backend-panel="openai">
+      <label>
+        <span class="label-text">Model ID <span class="help" title="Provider model identifier, such as gpt-4.1-mini or openai/gpt-4.1-mini.">?</span></span>
+        <input name="openai_model" placeholder="gpt-4.1-mini">
+      </label>
+
+      <label>
+        <span class="label-text">Provider preset <span class="help" title="Fills common API base and key source defaults for compatible OpenAI-style providers. You can override them.">?</span></span>
+        <select name="openai_provider_preset" id="openai-provider-preset" onchange="applyProviderPreset()">
+          <option value="openai">OpenAI</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="ollama">Ollama/local</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+
+      <div class="settings-grid credentials-grid">
+        <label>
+          <span class="label-text">API base <span class="help" title="OpenAI-compatible base URL. Leave blank to use the runtime default.">?</span></span>
+          <input name="openai_api_base" id="openai-api-base" placeholder="https://api.openai.com/v1">
+        </label>
+
+        <label>
+          <span class="label-text">API key source <span class="help" title="Choose whether to omit the key, store an environment variable reference, or store a literal value.">?</span></span>
+          <select name="openai_key_source" id="openai-key-source" onchange="syncModelSettingsForm()">
+            <option value="omitted">Omitted</option>
+            <option value="env">Environment variable</option>
+            <option value="literal">Literal value</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="key-source-panel" data-key-source-panel="env">
+        <label>
+          <span class="label-text">Env var name <span class="help" title="The settings file stores a reference like { env = 'OPENROUTER_API_KEY' }.">?</span></span>
+          <input name="openai_api_key_env" id="openai-api-key-env" placeholder="OPENROUTER_API_KEY">
+        </label>
+      </div>
+
+      <div class="key-source-panel" data-key-source-panel="literal">
+        <label>
+          <span class="label-text">Literal key <span class="help" title="Stored as written. Prefer environment references for shared settings files.">?</span></span>
+          <input name="openai_api_key_literal" id="openai-api-key-literal" placeholder="sk-...">
+        </label>
+      </div>
+
+      <div class="settings-grid parameter-grid">
+        <label>
+          <span class="label-text">Temperature <span class="help" title="Sampling temperature from 0 to 2.">?</span></span>
+          <input name="openai_temperature" type="number" step="0.01" min="0" max="2" value="0.3">
+        </label>
+        <label>
+          <span class="label-text">Max tokens <span class="help" title="Maximum completion tokens. Must be at least 1.">?</span></span>
+          <input name="openai_max_tokens" type="number" step="1" min="1" value="1000">
+        </label>
+        <label>
+          <span class="label-text">Top P <span class="help" title="Nucleus sampling value from 0 to 1.">?</span></span>
+          <input name="openai_top_p" type="number" step="0.01" min="0" max="1" value="1">
+        </label>
+        <label>
+          <span class="label-text">Frequency penalty <span class="help" title="Penalty from -2 to 2 for repeated tokens.">?</span></span>
+          <input name="openai_frequency_penalty" type="number" step="0.01" min="-2" max="2" value="0">
+        </label>
+        <label>
+          <span class="label-text">Presence penalty <span class="help" title="Penalty from -2 to 2 for tokens already present.">?</span></span>
+          <input name="openai_presence_penalty" type="number" step="0.01" min="-2" max="2" value="0">
+        </label>
+      </div>
+    </div>
+
+    <div class="backend-panel" data-backend-panel="dummy" hidden>
+      <label>
+        <span class="label-text">Response text <span class="help" title="Static response returned by the dummy backend.">?</span></span>
+        <textarea name="dummy_response" rows="6" placeholder="ok"></textarea>
+      </label>
+    </div>
+
     <button type="submit">Save Model</button>
   </form>
 
   <div class="panel">
     <h2>Saved Models</h2>
     {% for model_name, model in settings.models.items() %}
+      {% set params = model.get('params', {}) %}
+      {% set api_key = params.get('api_key') %}
       <article class="settings-item">
         <div class="section-head compact">
           <div>
             <h3>{{ model_name }}</h3>
             <p class="muted">{{ model.get('backend', '') }}</p>
           </div>
-          <form hx-post="/settings/models/delete" hx-target="#settings-models" hx-swap="innerHTML">
-            <input type="hidden" name="name" value="{{ model_name }}">
-            <button class="danger" type="submit">Delete</button>
-          </form>
+          <div class="settings-actions">
+            <button class="button secondary" type="button" onclick='editSavedModel({{ model_name | tojson }}, {{ model | tojson }})'>Edit</button>
+            <form hx-post="/settings/models/delete" hx-target="#settings-models" hx-swap="innerHTML">
+              <input type="hidden" name="name" value="{{ model_name }}">
+              <button class="danger" type="submit">Delete</button>
+            </form>
+          </div>
         </div>
-        <pre>{{ model.get('params', {}) | tojson(indent=2) }}</pre>
+        <dl class="settings-summary">
+          {% if model.get('backend') == 'openai' %}
+            <div><dt>Model</dt><dd>{{ params.get('model', '') }}</dd></div>
+            {% if params.get('api_base') %}
+              <div><dt>API base</dt><dd>{{ params.get('api_base') }}</dd></div>
+            {% endif %}
+            <div>
+              <dt>Key source</dt>
+              <dd>
+                {% if api_key is mapping and api_key.get('env') %}
+                  env: {{ api_key.get('env') }}
+                {% elif api_key %}
+                  literal
+                {% else %}
+                  omitted
+                {% endif %}
+              </dd>
+            </div>
+          {% elif model.get('backend') == 'dummy' %}
+            <div><dt>Response</dt><dd>{{ params.get('response', '') | truncate(120) }}</dd></div>
+          {% endif %}
+        </dl>
       </article>
     {% else %}
       <p class="muted">No reusable models configured yet.</p>
     {% endfor %}
   </div>
 </section>
+
+<script>
+const providerDefaults = {
+  openai: {base: "", keySource: "omitted", env: "", literal: ""},
+  openrouter: {base: "https://openrouter.ai/api/v1", keySource: "env", env: "OPENROUTER_API_KEY", literal: ""},
+  ollama: {base: "http://localhost:11434/v1", keySource: "literal", env: "", literal: "abc"},
+  custom: null,
+};
+
+function modelSettingsForm() {
+  return document.getElementById("model-settings-form");
+}
+
+function setFormValue(form, name, value) {
+  const field = form.elements[name];
+  if (field) field.value = value == null ? "" : value;
+}
+
+function syncModelSettingsForm() {
+  const form = modelSettingsForm();
+  if (!form) return;
+  const backend = form.elements.backend.value;
+  document.querySelectorAll("[data-backend-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.backendPanel !== backend;
+  });
+  const keySource = form.elements.openai_key_source.value;
+  document.querySelectorAll("[data-key-source-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.keySourcePanel !== keySource;
+  });
+}
+
+function applyProviderPreset() {
+  const form = modelSettingsForm();
+  if (!form) return;
+  const preset = form.elements.openai_provider_preset.value;
+  const defaults = providerDefaults[preset];
+  if (defaults) {
+    setFormValue(form, "openai_api_base", defaults.base);
+    setFormValue(form, "openai_key_source", defaults.keySource);
+    setFormValue(form, "openai_api_key_env", defaults.env);
+    setFormValue(form, "openai_api_key_literal", defaults.literal);
+  }
+  syncModelSettingsForm();
+}
+
+function inferProviderPreset(params) {
+  if (!params.api_base && !params.api_key) return "openai";
+  if (params.api_base === providerDefaults.openrouter.base && params.api_key && params.api_key.env === "OPENROUTER_API_KEY") return "openrouter";
+  if (params.api_base === providerDefaults.ollama.base && params.api_key === "abc") return "ollama";
+  return "custom";
+}
+
+function editSavedModel(name, model) {
+  const form = modelSettingsForm();
+  const params = model.params || {};
+  setFormValue(form, "name", name);
+  setFormValue(form, "backend", model.backend || "openai");
+  setFormValue(form, "openai_model", params.model || "");
+  setFormValue(form, "openai_temperature", params.temperature ?? 0.3);
+  setFormValue(form, "openai_max_tokens", params.max_tokens ?? 1000);
+  setFormValue(form, "openai_top_p", params.top_p ?? 1);
+  setFormValue(form, "openai_frequency_penalty", params.frequency_penalty ?? 0);
+  setFormValue(form, "openai_presence_penalty", params.presence_penalty ?? 0);
+  setFormValue(form, "dummy_response", params.response || "");
+  const preset = inferProviderPreset(params);
+  setFormValue(form, "openai_provider_preset", preset);
+  setFormValue(form, "openai_api_base", params.api_base || "");
+  if (params.api_key && typeof params.api_key === "object" && params.api_key.env) {
+    setFormValue(form, "openai_key_source", "env");
+    setFormValue(form, "openai_api_key_env", params.api_key.env);
+    setFormValue(form, "openai_api_key_literal", "");
+  } else if (params.api_key) {
+    setFormValue(form, "openai_key_source", "literal");
+    setFormValue(form, "openai_api_key_env", "");
+    setFormValue(form, "openai_api_key_literal", params.api_key);
+  } else {
+    setFormValue(form, "openai_key_source", "omitted");
+    setFormValue(form, "openai_api_key_env", "");
+    setFormValue(form, "openai_api_key_literal", "");
+  }
+  syncModelSettingsForm();
+}
+
+function resetModelSettingsForm() {
+  const form = modelSettingsForm();
+  form.reset();
+  applyProviderPreset();
+}
+
+syncModelSettingsForm();
+</script>

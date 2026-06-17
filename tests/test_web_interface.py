@@ -225,7 +225,7 @@ def test_dashboard_editor_validation_and_prompt_route(monkeypatch, tmp_path):
     assert prompt.json()["prompt"] == "Question: hello"
 
 
-def test_settings_page_saves_reusable_models(tmp_path):
+def test_settings_page_saves_openai_model_with_literal_base_and_key(tmp_path):
     settings_path = tmp_path / ".datagen" / "settings.toml"
     app = create_app(project_root=tmp_path, settings_path=settings_path)
     from fastapi.testclient import TestClient
@@ -238,13 +238,16 @@ def test_settings_page_saves_reusable_models(tmp_path):
         data={
             "name": "local-gemma",
             "backend": "openai",
-            "params_json": json.dumps(
-                {
-                    "model": "gemma3:12b",
-                    "api_base": "http://localhost:11434/v1",
-                    "api_key": "abc",
-                }
-            ),
+            "openai_model": "gemma3:12b",
+            "openai_provider_preset": "custom",
+            "openai_api_base": "http://localhost:11434/v1",
+            "openai_key_source": "literal",
+            "openai_api_key_literal": "abc",
+            "openai_temperature": "0.2",
+            "openai_max_tokens": "512",
+            "openai_top_p": "0.9",
+            "openai_frequency_penalty": "0.1",
+            "openai_presence_penalty": "0.2",
         },
     )
 
@@ -252,9 +255,148 @@ def test_settings_page_saves_reusable_models(tmp_path):
 
     assert page.status_code == 200
     assert str(settings_path) in page.text
+    assert "Provider preset" in page.text
+    assert "API key source" in page.text
+    assert "Edit" in page.text or "No reusable models configured yet" in page.text
     assert saved.status_code == 200
     assert settings.models["local-gemma"]["backend"] == "openai"
     assert settings.models["local-gemma"]["params"]["model"] == "gemma3:12b"
+    assert settings.models["local-gemma"]["params"]["api_base"] == "http://localhost:11434/v1"
+    assert settings.models["local-gemma"]["params"]["api_key"] == "abc"
+    assert settings.models["local-gemma"]["params"]["temperature"] == 0.2
+    assert settings.models["local-gemma"]["params"]["max_tokens"] == 512
+    assert "Edit" in saved.text
+    assert "local-gemma" in saved.text
+    assert "literal" in saved.text
+
+
+def test_settings_page_saves_openrouter_preset_env_key(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "router-key")
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    saved = test_client.post(
+        "/settings/models",
+        data={
+            "name": "router",
+            "backend": "openai",
+            "openai_model": "openai/gpt-4.1-mini",
+            "openai_provider_preset": "openrouter",
+        },
+    )
+
+    settings = SettingsStore(settings_path).load()
+
+    assert saved.status_code == 200
+    assert settings.models["router"]["params"]["api_base"] == "https://openrouter.ai/api/v1"
+    assert settings.models["router"]["params"]["api_key"] == {"env": "OPENROUTER_API_KEY"}
+    assert "env: OPENROUTER_API_KEY" in saved.text
+
+
+def test_settings_page_saves_dummy_backend(tmp_path):
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    saved = test_client.post(
+        "/settings/models",
+        data={
+            "name": "dummy-model",
+            "backend": "dummy",
+            "dummy_response": "ok",
+        },
+    )
+
+    settings = SettingsStore(settings_path).load()
+
+    assert saved.status_code == 200
+    assert settings.models["dummy-model"] == {
+        "backend": "dummy",
+        "params": {"response": "ok"},
+    }
+    assert "dummy-model" in saved.text
+    assert "ok" in saved.text
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (
+            {"name": "bad", "backend": "other", "openai_model": "gpt-4.1-mini"},
+            "Backend must be openai or dummy",
+        ),
+        (
+            {"name": "bad", "backend": "openai", "openai_provider_preset": "openai"},
+            "OpenAI model is required",
+        ),
+        (
+            {
+                "name": "bad",
+                "backend": "openai",
+                "openai_model": "gpt-4.1-mini",
+                "openai_provider_preset": "openai",
+                "openai_temperature": "hot",
+            },
+            "Temperature must be a number",
+        ),
+        (
+            {
+                "name": "bad",
+                "backend": "openai",
+                "openai_model": "gpt-4.1-mini",
+                "openai_provider_preset": "custom",
+                "openai_key_source": "env",
+            },
+            "API key environment variable name is required",
+        ),
+        (
+            {"name": "bad", "backend": "dummy", "dummy_response": ""},
+            "Dummy response is required",
+        ),
+        (
+            {
+                "name": "bad",
+                "backend": "openai",
+                "params_json": json.dumps({"model": "gpt-4.1-mini"}),
+            },
+            "Params JSON is no longer accepted",
+        ),
+    ],
+)
+def test_settings_model_form_validation_errors(payload, message, tmp_path):
+    app = create_app(project_root=tmp_path, settings_path=tmp_path / "settings.toml")
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    response = test_client.post("/settings/models", data=payload)
+
+    assert response.status_code == 400
+    assert message in response.text
+
+
+def test_settings_model_form_rejects_missing_env_reference(monkeypatch, tmp_path):
+    monkeypatch.delenv("MISSING_API_KEY", raising=False)
+    app = create_app(project_root=tmp_path, settings_path=tmp_path / "settings.toml")
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    response = test_client.post(
+        "/settings/models",
+        data={
+            "name": "missing-env",
+            "backend": "openai",
+            "openai_model": "gpt-4.1-mini",
+            "openai_provider_preset": "custom",
+            "openai_key_source": "env",
+            "openai_api_key_env": "MISSING_API_KEY",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "`api_key` references missing environment variable `MISSING_API_KEY`" in response.text
 
 
 def test_guided_builder_creates_config_with_settings_model(monkeypatch, tmp_path):
@@ -263,8 +405,7 @@ def test_guided_builder_creates_config_with_settings_model(monkeypatch, tmp_path
     settings_path = tmp_path / ".datagen" / "settings.toml"
     SettingsStore(settings_path).upsert_model(
         name="configured-model",
-        backend="dummy",
-        params_json=json.dumps({"response": "ok"}),
+        fields={"backend": "dummy", "dummy_response": "ok"},
     )
     monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
