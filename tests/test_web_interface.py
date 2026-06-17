@@ -90,6 +90,71 @@ def test_prompt_rendering_uses_aliases_and_reports_missing_fields(tmp_path):
     assert "field 'text' not found" in missing["errors"][0]
 
 
+def test_prompt_rendering_supports_jinja_filters(tmp_path):
+    config_path, _ = write_config(tmp_path)
+    config_text = config_path.read_text()
+    config_path.write_text(
+        config_text.replace(
+            'default_prompt_template = "Question: {{ input.text }}"',
+            'default_prompt_template = "Question: {{ input.text | truncate(20) }}"',
+        )
+    )
+
+    result = config_utils.render_prompt_from_row(
+        config_path,
+        source_name="source",
+        raw_row=json.dumps(
+            {
+                "body": (
+                    "This is a longer sentence that should be truncated by "
+                    "Jinja."
+                )
+            }
+        ),
+    )
+
+    assert result["ok"] is True
+    assert result["prompt"].startswith("Question: This is")
+    assert result["prompt"].endswith("...")
+
+
+def test_output_template_supports_jinja_filters_and_tojson(tmp_path):
+    config_path, _ = write_config(tmp_path)
+    config_text = config_path.read_text()
+    config_path.write_text(
+        config_text.replace(
+            'output_template = \'{"text": "{{ input.text }}", "answer": "{{ llm_output }}"}\'',
+            (
+                'output_template = \'{'
+                '"title": {{ input.title | tojson }}, '
+                '"english": {{ input.text | truncate(20) | tojson }}, '
+                '"answer": {{ llm_output | tojson }}'
+                '}\''
+            ),
+        )
+    )
+
+    from datagen.generators.templated import TemplatedGenerator
+
+    config = GenerationPipelineConfig.from_path(config_path, create_output_dir=False)
+    generator = TemplatedGenerator(config=config.generator_config)
+    ds_config = config.generator_config.source_datasets_config[0]
+
+    result = generator._format_output(
+        {
+            "title": "Example title",
+            "text": "This is a longer sentence that should be truncated by Jinja.",
+        },
+        "translated",
+        ds_config,
+    )
+
+    assert result["title"] == "Example title"
+    assert result["answer"] == "translated"
+    assert result["english"].startswith("This is")
+    assert result["english"].endswith("...")
+
+
 def test_dummy_llm_import_and_openai_dict_response_format():
     dummy = DummyLLM(response="ok")
     assert dummy.generate([]) == "ok"

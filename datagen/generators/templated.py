@@ -1,10 +1,9 @@
 import json
-import re
 from dataclasses import asdict, dataclass
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Set
 
 from pydantic import BaseModel
-from jinja2 import Environment, Template, TemplateSyntaxError
+from jinja2 import Environment, StrictUndefined, TemplateSyntaxError, nodes
 
 from datagen.core import (
     BaseGeneratorConfig,
@@ -49,7 +48,7 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
             self.aliases = aliases or {}
 
             # Setup Jinja2 environment
-            self.jinja_env = Environment()
+            self.jinja_env = Environment(undefined=StrictUndefined)
 
             # Setup structured output class if provided
             self.structured_output_cls = None
@@ -143,14 +142,14 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
                     f"Invalid prompt_template syntax for dataset '{source_name}': {e}"
                 )
 
-            # Extract template variables
-            template_vars = self._extract_template_variables(prompt_template)
+            # Extract input fields referenced by the template.
+            input_fields = self._extract_input_fields(prompt_template)
 
             # Validate aliases if provided
             if ds_config.aliases:
                 # Check that all aliased columns are used in templates
                 for alias_name, original_column in ds_config.aliases.items():
-                    if f"input.{alias_name}" not in template_vars:
+                    if alias_name not in input_fields:
                         print(
                             f"Warning: Alias '{alias_name}' defined but not used in template for dataset '{source_name}'"
                         )
@@ -158,16 +157,26 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
             # Validate that template variables have corresponding aliases or columns
             # We'll do this validation at runtime when we have the actual dataset
 
-        def _extract_template_variables(self, template_str: str) -> Set[str]:
-            """Extract all template variables from a Jinja2 template."""
-            # Simple regex-based extraction instead of AST parsing
-            variables = set()
-            for var in re.findall(r"\{\{\s*([^}]+)\s*\}\}", template_str):
-                var = var.strip()
-                # Extract the main variable name (before any filters or operations)
-                main_var = var.split("|")[0].split(".")[0].strip()
-                variables.add(var.strip())
-            return variables
+        def _extract_input_fields(self, template_str: str) -> Set[str]:
+            """Extract source-row fields referenced as ``input.field``."""
+            parsed = self.jinja_env.parse(template_str)
+            fields: set[str] = set()
+
+            for node in parsed.find_all(nodes.Getattr):
+                if isinstance(node.node, nodes.Name) and node.node.name == "input":
+                    fields.add(node.attr)
+
+            for node in parsed.find_all(nodes.Getitem):
+                if not (
+                    isinstance(node.node, nodes.Name) and node.node.name == "input"
+                ):
+                    continue
+                if isinstance(node.arg, nodes.Const) and isinstance(
+                    node.arg.value, str
+                ):
+                    fields.add(node.arg.value)
+
+            return fields
 
         @classmethod
         def from_config(
@@ -308,16 +317,14 @@ class TemplatedGenerator(BaseGenerator[TemplatedDatasetConfig]):
     ):
         """Validate that the row has all necessary fields for the template."""
         # Access the method from our specific config class
-        extract_vars_method = getattr(self.config, "_extract_template_variables")
-        template_vars = extract_vars_method(template_str)
+        extract_input_fields = getattr(self.config, "_extract_input_fields")
+        input_fields = extract_input_fields(template_str)
 
-        for var in template_vars:
-            if var.startswith("input."):
-                field_name = var[6:]  # Remove 'input.' prefix
-                if field_name not in row:
-                    raise ValueError(
-                        f"Template variable '{var}' used in dataset '{source_name}' but field '{field_name}' not found in row"
-                    )
+        for field_name in input_fields:
+            if field_name not in row:
+                raise ValueError(
+                    f"Template variable 'input.{field_name}' used in dataset '{source_name}' but field '{field_name}' not found in row"
+                )
 
     def _format_output(
         self,
