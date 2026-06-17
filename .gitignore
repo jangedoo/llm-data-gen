@@ -1,6 +1,7 @@
 notebooks
 .env
 raw_data
+datagen/web/frontend/node_modules/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

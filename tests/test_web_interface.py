@@ -543,6 +543,151 @@ def test_guided_builder_creates_config_with_settings_model(monkeypatch, tmp_path
     assert "Updated in builder" in (config_dir / "built.toml").read_text()
 
 
+def test_json_config_api_and_template_context(monkeypatch, tmp_path):
+    config_dir = tmp_path / "gen_configs"
+    config_dir.mkdir()
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    SettingsStore(settings_path).upsert_model(
+        name="configured-model",
+        fields={"backend": "dummy", "dummy_response": "ok"},
+    )
+    monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
+
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    payload = {
+        "dataset_name": "Built",
+        "description": "Built in UI",
+        "authors": ["Tester"],
+        "generation_output_dir": "../raw_data/built",
+        "generation_logging_steps": 10,
+        "sources": [
+            {
+                "name": "source",
+                "path": "dummy/source",
+                "split": "train",
+                "columns": ["body", "label"],
+            }
+        ],
+        "models": [{"kind": "settings", "name": "configured-model"}],
+        "default_model": "configured-model",
+        "default_system_prompt": "System",
+        "default_prompt_template": "Question: {{ input.text }} {{ input.missing }}",
+        "output_template": '{"text": "{{ input.text }}", "answer": "{{ llm_output }}"}',
+        "source_datasets": [
+            {
+                "name": "source",
+                "max_records": 1,
+                "shuffle": False,
+                "max_failures": 0.5,
+            }
+        ],
+        "aliases": [{"source": "source", "column_map": {"text": "body", "unused": "label"}}],
+        "curator": {
+            "upload_to_hf": False,
+            "train_test_split": True,
+            "update_card": True,
+            "language": ["en"],
+            "license": "mit",
+        },
+    }
+
+    context = test_client.post("/api/templates/context", json=payload)
+    preview = test_client.post("/api/configs/preview", json=payload)
+    created = test_client.post(
+        "/api/configs",
+        json={"name": "built.toml", "payload": payload},
+    )
+    loaded = test_client.get("/api/configs/built.toml")
+
+    assert context.status_code == 200
+    assert "text" in context.json()["sources"][0]["available_input_fields"]
+    assert context.json()["sources"][0]["missing_input_fields"] == ["missing"]
+    assert context.json()["sources"][0]["unused_aliases"] == ["unused"]
+    assert context.json()["output"]["uses_llm_output"] is True
+    assert preview.status_code == 200
+    assert preview.json()["ok"] is True
+    assert created.status_code == 200
+    assert loaded.status_code == 200
+    assert loaded.json()["payload"]["dataset_name"] == "Built"
+
+
+def test_json_trial_job_uses_temp_config_and_streams_events(monkeypatch, tmp_path):
+    config_dir = tmp_path / "gen_configs"
+    config_dir.mkdir()
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    SettingsStore(settings_path).upsert_model(
+        name="configured-model",
+        fields={"backend": "dummy", "dummy_response": "ok"},
+    )
+    monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
+
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    app.state.jobs.start_generate = lambda config_path: app.state.jobs._start(
+        kind="generate",
+        config_path=config_path,
+        command=[
+            "python",
+            "-c",
+            "print('trial started', flush=True)",
+        ],
+    )
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    payload = {
+        "dataset_name": "Trial",
+        "description": "Trial",
+        "authors": ["Tester"],
+        "generation_output_dir": "../raw_data/trial",
+        "generation_logging_steps": 1,
+        "sources": [{"name": "source", "path": "dummy/source", "split": "train"}],
+        "models": [{"kind": "settings", "name": "configured-model"}],
+        "default_model": "configured-model",
+        "default_system_prompt": "System",
+        "default_prompt_template": "Question: {{ input.text }}",
+        "output_template": '{"text": "{{ input.text }}", "answer": "{{ llm_output }}"}',
+        "source_datasets": [
+            {
+                "name": "source",
+                "max_records": 1,
+                "shuffle": False,
+                "max_failures": 0.5,
+            }
+        ],
+        "aliases": [{"source": "source", "column_map": {"text": "body"}}],
+        "curator": {
+            "upload_to_hf": False,
+            "train_test_split": True,
+            "update_card": True,
+            "language": ["en"],
+            "license": "mit",
+        },
+    }
+
+    response = test_client.post("/api/jobs/trial", json={"payload": payload, "limit": 1})
+    assert response.status_code == 200
+    job = response.json()
+    assert job["kind"] == "trial"
+    assert "datagen-web-trials" in job["config_path"]
+    assert not (config_dir / "trial.toml").exists()
+
+    deadline = time.time() + 5
+    while job["status"] in {"queued", "running"} and time.time() < deadline:
+        time.sleep(0.05)
+        job = test_client.get(f"/api/jobs/{job['id']}").json()
+
+    assert job["status"] == "succeeded"
+    events = test_client.get(f"/api/jobs/{job['id']}/events")
+    assert events.status_code == 200
+    assert "event: job" in events.text
+    assert "event: done" in events.text
+
+
 def test_builder_source_preview_returns_columns(monkeypatch, tmp_path):
     def fake_load_dataset(path, subset=None, split="train"):
         assert path == "dummy/source"

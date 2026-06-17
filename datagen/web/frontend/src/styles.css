@@ -1,0 +1,444 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #17201c;
+  background: #f7f4ec;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 1180px;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d9d1bc;
+  border-radius: 7px;
+  color: #17201c;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 36px;
+  padding: 7px 12px;
+}
+
+button:hover {
+  border-color: #315a49;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+button.primary {
+  background: #315a49;
+  border-color: #315a49;
+  color: white;
+}
+
+button.danger {
+  background: #fff3ef;
+  border-color: #d8664d;
+  color: #9f3422;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(900px, 1fr);
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #17201c;
+  color: white;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 22px;
+}
+
+.brand {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.brand div {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand span,
+.nav-label,
+.config small {
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+}
+
+.nav-action,
+.config {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: white;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.config-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.config {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config.active {
+  background: #315a49;
+}
+
+.workspace {
+  padding: 24px;
+}
+
+.topbar {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+h1,
+h2 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 24px;
+}
+
+h2 {
+  font-size: 17px;
+}
+
+p {
+  color: #5c665f;
+  margin: 5px 0 0;
+}
+
+.actions,
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.status-line {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #e1d8c2;
+  border-radius: 7px;
+  display: flex;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.content-grid {
+  align-items: start;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(640px, 1fr) 390px;
+}
+
+.builder-panel,
+.side-card {
+  background: #ffffff;
+  border: 1px solid #e1d8c2;
+  border-radius: 8px;
+  box-shadow: 0 12px 35px rgba(23, 32, 28, 0.08);
+}
+
+.builder-panel {
+  min-height: calc(100vh - 120px);
+  overflow: hidden;
+}
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  position: sticky;
+  top: 20px;
+}
+
+.side-card {
+  padding: 16px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  min-height: calc(100vh - 120px);
+}
+
+.tab-list {
+  background: #fbfaf6;
+  border-right: 1px solid #e1d8c2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.tab-list button {
+  border-color: transparent;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.tab-list button[data-state="active"] {
+  background: #e9f2ee;
+  border-color: #bad1c7;
+  color: #315a49;
+}
+
+[role="tabpanel"] {
+  padding: 18px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field span,
+.check-row {
+  color: #44504a;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+input,
+textarea,
+select {
+  background: #fffdfa;
+  border: 1px solid #d9d1bc;
+  border-radius: 7px;
+  color: #17201c;
+  min-height: 36px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+textarea.code,
+pre,
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+textarea.tall {
+  min-height: 150px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stack.tight {
+  gap: 10px;
+}
+
+.item-panel {
+  background: #fbfaf6;
+  border: 1px solid #e1d8c2;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.item-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.icon-button {
+  border-radius: 7px;
+  min-height: 32px;
+  padding: 6px;
+}
+
+.alias-grid {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr 1fr auto auto;
+  margin-top: 12px;
+}
+
+.row-preview,
+.toml-preview,
+.log-view {
+  background: #17201c;
+  border-radius: 8px;
+  color: #f7f4ec;
+  max-height: 300px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+.toml-preview {
+  font-size: 12px;
+}
+
+.log-view {
+  min-height: 180px;
+}
+
+.settings-model-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.check-card {
+  background: #fbfaf6;
+  border: 1px solid #e1d8c2;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.check-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.check-row input,
+.check-card input {
+  width: auto;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+code {
+  background: #eef4f1;
+  border: 1px solid #c9d9d2;
+  border-radius: 6px;
+  color: #315a49;
+  padding: 3px 6px;
+}
+
+.error-line {
+  background: #fff3ef;
+  border: 1px solid #efb4a6;
+  border-radius: 6px;
+  color: #9f3422;
+  margin-top: 6px;
+  padding: 6px 8px;
+}
+
+.hint-line {
+  color: #6c6a58;
+  margin-top: 5px;
+}
+
+.metric-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.metric-grid span {
+  background: #fbfaf6;
+  border: 1px solid #e1d8c2;
+  border-radius: 7px;
+  padding: 10px;
+}
+
+.metric-grid strong {
+  display: block;
+  font-size: 20px;
+}
+
+.run-state {
+  border-radius: 999px;
+  display: inline-flex;
+  font-weight: 700;
+  padding: 6px 10px;
+  width: fit-content;
+}
+
+.run-state.running {
+  background: #e9f2ee;
+  color: #315a49;
+}
+
+.run-state.failed,
+.run-state.cancelled {
+  background: #fff3ef;
+  color: #9f3422;
+}
+
+.run-state.succeeded {
+  background: #eef8e8;
+  color: #32601f;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

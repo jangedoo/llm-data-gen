@@ -5,6 +5,9 @@ description = ""
 authors = ["Sanjaya Subedi <jangedoo@gmail.com>"]
 readme = "README.md"
 packages = [{include = "datagen"}]
+include = [
+    "datagen/web/frontend/dist/**/*",
+]
 
 [tool.poetry.dependencies]
 python = "^3.11"
