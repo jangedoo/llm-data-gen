@@ -90,6 +90,28 @@ class DummyModelConfig(ModelConfig):
         return DummyLLM(response=self.response)
 
 
+def _resolve_env_param(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        if set(value) != {"env"}:
+            raise ValueError(
+                f"`{field_name}` env reference must only contain an `env` key"
+            )
+        env_name = value["env"]
+        if not isinstance(env_name, str) or not env_name.strip():
+            raise ValueError(f"`{field_name}` env reference must be a non-empty string")
+        env_value = os.environ.get(env_name)
+        if env_value is None:
+            raise ValueError(
+                f"`{field_name}` references missing environment variable `{env_name}`"
+            )
+        return env_value
+    raise ValueError(f"`{field_name}` must be a string or an env reference")
+
+
 @dataclass
 class OpenAIModelConfig(ModelConfig):
     model: str
@@ -116,8 +138,8 @@ class OpenAIModelConfig(ModelConfig):
         top_p = float(params.get("top_p", 1))
         frequency_penalty = float(params.get("frequency_penalty", 0))
         presence_penalty = float(params.get("presence_penalty", 0))
-        api_base = params.get("api_base")
-        api_key = params.get("api_key")
+        api_base = _resolve_env_param(params.get("api_base"), "api_base")
+        api_key = _resolve_env_param(params.get("api_key"), "api_key")
 
         return cls(
             model=model,

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import datasets
 
-from datagen.core.gen_config import GenerationPipelineConfig
+from datagen.core.gen_config import GenerationPipelineConfig, OpenAIModelConfig
 from datagen.llm.dummy import DummyLLM
 from datagen.llm.openai import OpenAILLM
 from datagen.web import builder
@@ -116,6 +116,81 @@ def test_dummy_llm_import_and_openai_dict_response_format():
 
     llm = OpenAILLM(client=Client(), model="test")
     assert llm.generate([], response_format={"type": "text"}) == "plain"
+
+
+def test_openai_model_config_resolves_env_params(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
+    monkeypatch.setenv("OPENROUTER_API_BASE", "https://openrouter.ai/api/v1")
+
+    config = OpenAIModelConfig.from_config(
+        {
+            "backend": "openai",
+            "params": {
+                "model": "openai/gpt-4.1-mini",
+                "api_key": {"env": "OPENROUTER_API_KEY"},
+                "api_base": {"env": "OPENROUTER_API_BASE"},
+            },
+        }
+    )
+
+    assert config.api_key == "openrouter-key"
+    assert config.api_base == "https://openrouter.ai/api/v1"
+
+
+def test_openai_model_config_keeps_literal_env_like_strings():
+    config = OpenAIModelConfig.from_config(
+        {
+            "backend": "openai",
+            "params": {
+                "model": "gpt-4.1-mini",
+                "api_key": "$OPENROUTER_API_KEY",
+                "api_base": "${OPENROUTER_API_BASE}",
+            },
+        }
+    )
+
+    assert config.api_key == "$OPENROUTER_API_KEY"
+    assert config.api_base == "${OPENROUTER_API_BASE}"
+
+
+def test_openai_model_config_rejects_missing_env_param(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(
+        ValueError,
+        match="`api_key` references missing environment variable `OPENROUTER_API_KEY`",
+    ):
+        OpenAIModelConfig.from_config(
+            {
+                "backend": "openai",
+                "params": {
+                    "model": "openai/gpt-4.1-mini",
+                    "api_key": {"env": "OPENROUTER_API_KEY"},
+                },
+            }
+        )
+
+
+def test_openai_model_config_rejects_invalid_env_param_shapes():
+    base_config = {
+        "backend": "openai",
+        "params": {"model": "gpt-4.1-mini"},
+    }
+
+    config = {
+        **base_config,
+        "params": {**base_config["params"], "api_key": {"env": "KEY", "default": ""}},
+    }
+    with pytest.raises(ValueError, match="must only contain an `env` key"):
+        OpenAIModelConfig.from_config(config)
+
+    config = {**base_config, "params": {**base_config["params"], "api_key": {"env": ""}}}
+    with pytest.raises(ValueError, match="must be a non-empty string"):
+        OpenAIModelConfig.from_config(config)
+
+    config = {**base_config, "params": {**base_config["params"], "api_key": 123}}
+    with pytest.raises(ValueError, match="must be a string or an env reference"):
+        OpenAIModelConfig.from_config(config)
 
 
 def test_dashboard_editor_validation_and_prompt_route(monkeypatch, tmp_path):
