@@ -1,4 +1,4 @@
-import type { BuilderPayload, ConfigSummary, JobSnapshot, TemplateContext } from "./types";
+import type { BuilderPayload, ConfigSummary, JobSnapshot, SavedModel, TemplateContext } from "./types";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -34,7 +34,7 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload)
     }),
-  settings: () => request<{ models: Record<string, { backend: string; params: Record<string, unknown> }>; settings_path: string }>("/api/settings/models"),
+  settings: () => request<{ models: Record<string, SavedModel>; settings_path: string }>("/api/settings/models"),
   saveModel: (payload: Record<string, unknown>) =>
     request<{ ok: boolean; models: Record<string, unknown> }>("/api/settings/models", {
       method: "POST",

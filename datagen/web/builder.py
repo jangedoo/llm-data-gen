@@ -74,6 +74,53 @@ def _strip_none(value: Any) -> Any:
     return value
 
 
+def _settings_model_config(
+    model_name: str, model: dict[str, Any], settings: WebSettings
+) -> dict[str, Any]:
+    if model_name not in settings.models:
+        raise ValueError(f"Settings model not found: {model_name}")
+    model_config = settings.models[model_name]
+    params = dict(model_config.get("params", {}))
+    overrides = model.get("overrides") or {}
+    if not isinstance(overrides, dict):
+        raise ValueError(f"Model {model_name} overrides must be an object")
+    override_params = overrides.get("params", {})
+    if override_params:
+        params.update(_parse_params(override_params, f"{model_name} override"))
+    return {
+        "backend": _required_string(
+            model_config.get("backend"), f"Model {model_name} backend"
+        ),
+        "params": params,
+    }
+
+
+def _payload_model_from_config(
+    model_name: str, model_config: dict[str, Any], settings: WebSettings
+) -> dict[str, Any]:
+    settings_model = settings.models.get(model_name)
+    if settings_model and settings_model.get("backend") == model_config.get("backend"):
+        base_params = settings_model.get("params", {})
+        actual_params = model_config.get("params", {})
+        if isinstance(base_params, dict) and isinstance(actual_params, dict):
+            override_params = {
+                key: value
+                for key, value in actual_params.items()
+                if base_params.get(key) != value
+            }
+            payload: dict[str, Any] = {"kind": "settings", "name": model_name}
+            if override_params:
+                payload["overrides"] = {"params": override_params}
+            return payload
+
+    return {
+        "kind": "custom",
+        "name": model_name,
+        "backend": model_config.get("backend", ""),
+        "params": model_config.get("params", {}),
+    }
+
+
 def build_config_dict(payload: dict[str, Any], settings: WebSettings) -> dict[str, Any]:
     config: dict[str, Any] = {
         "dataset_name": _required_string(payload.get("dataset_name"), "Dataset name"),
@@ -106,15 +153,7 @@ def build_config_dict(payload: dict[str, Any], settings: WebSettings) -> dict[st
     for model in payload.get("models", []):
         model_name = _required_string(model.get("name"), "Model name")
         if model.get("kind") == "settings":
-            if model_name not in settings.models:
-                raise ValueError(f"Settings model not found: {model_name}")
-            model_config = settings.models[model_name]
-            models[model_name] = {
-                "backend": _required_string(
-                    model_config.get("backend"), f"Model {model_name} backend"
-                ),
-                "params": dict(model_config.get("params", {})),
-            }
+            models[model_name] = _settings_model_config(model_name, model, settings)
         else:
             models[model_name] = {
                 "backend": _required_string(
@@ -230,18 +269,7 @@ def payload_from_config_dict(
 
     models = []
     for model_name, model_config in config.get("models", {}).items():
-        settings_model = settings.models.get(model_name)
-        if settings_model == model_config:
-            models.append({"kind": "settings", "name": model_name})
-        else:
-            models.append(
-                {
-                    "kind": "custom",
-                    "name": model_name,
-                    "backend": model_config.get("backend", ""),
-                    "params": model_config.get("params", {}),
-                }
-            )
+        models.append(_payload_model_from_config(model_name, model_config, settings))
 
     return {
         "dataset_name": config.get("dataset_name", ""),

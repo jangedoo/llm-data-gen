@@ -3,6 +3,14 @@ export type ModelPayload = {
   name: string;
   backend?: string;
   params?: Record<string, unknown> | string;
+  overrides?: {
+    params?: Record<string, unknown>;
+  };
+};
+
+export type SavedModel = {
+  backend: string;
+  params: Record<string, unknown>;
 };
 
 export type SourcePayload = {

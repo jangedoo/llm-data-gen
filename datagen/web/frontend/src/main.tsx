@@ -3,18 +3,22 @@ import { createRoot } from "react-dom/client";
 import * as Tabs from "@radix-ui/react-tabs";
 import {
   Activity,
+  ChevronDown,
+  ChevronRight,
   Database,
   FileCheck,
   Loader2,
+  Pencil,
   Play,
   Plus,
+  RotateCcw,
   Save,
-  Settings,
+  SlidersHorizontal,
   Square,
   Trash2
 } from "lucide-react";
 import { api } from "./api";
-import type { BuilderPayload, ConfigSummary, JobSnapshot, SourcePayload, TemplateContext } from "./types";
+import type { BuilderPayload, ConfigSummary, JobSnapshot, ModelPayload, SavedModel, SourcePayload, TemplateContext } from "./types";
 import "./styles.css";
 
 const emptyPayload: BuilderPayload = {
@@ -43,6 +47,127 @@ const emptyPayload: BuilderPayload = {
     citation_bibtex: ""
   }
 };
+
+type Page = "configs" | "models";
+
+type ModelFormState = {
+  name: string;
+  backend: "openai" | "dummy";
+  openai_model: string;
+  openai_provider_preset: "openai" | "openrouter" | "ollama" | "custom";
+  openai_api_base: string;
+  openai_key_source: "omitted" | "env" | "literal";
+  openai_api_key_env: string;
+  openai_api_key_literal: string;
+  openai_temperature: string;
+  openai_max_tokens: string;
+  openai_top_p: string;
+  openai_frequency_penalty: string;
+  openai_presence_penalty: string;
+  dummy_response: string;
+};
+
+const emptyModelForm: ModelFormState = {
+  name: "",
+  backend: "openai",
+  openai_model: "gpt-4.1-mini",
+  openai_provider_preset: "openai",
+  openai_api_base: "",
+  openai_key_source: "omitted",
+  openai_api_key_env: "",
+  openai_api_key_literal: "",
+  openai_temperature: "0.3",
+  openai_max_tokens: "1000",
+  openai_top_p: "1",
+  openai_frequency_penalty: "0",
+  openai_presence_penalty: "0",
+  dummy_response: "ok"
+};
+
+const numericParamFields = new Set(["temperature", "top_p", "frequency_penalty", "presence_penalty"]);
+
+function paramsOf(model: ModelPayload): Record<string, unknown> {
+  if (!model.params || typeof model.params === "string") return {};
+  return model.params;
+}
+
+function effectiveSettingsParams(model: ModelPayload, base: SavedModel): Record<string, unknown> {
+  return { ...base.params, ...(model.overrides?.params || {}) };
+}
+
+function formatValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
+function parseParamValue(field: string, value: string): unknown {
+  if (field === "max_tokens") return value === "" ? "" : Number.parseInt(value, 10);
+  if (numericParamFields.has(field)) return value === "" ? "" : Number.parseFloat(value);
+  if (field === "api_key_env") return value ? { env: value } : undefined;
+  return value;
+}
+
+function modelSummary(model: SavedModel): string {
+  if (model.backend === "dummy") return `dummy · ${formatValue(model.params.response || "response")}`;
+  const parts = [formatValue(model.params.model || "model")];
+  if (model.params.api_base) parts.push(formatValue(model.params.api_base));
+  if (typeof model.params.api_key === "object" && model.params.api_key && "env" in model.params.api_key) {
+    parts.push(`env: ${String((model.params.api_key as { env?: unknown }).env)}`);
+  } else if (model.params.api_key) {
+    parts.push("literal key");
+  } else {
+    parts.push("key omitted");
+  }
+  return parts.join(" · ");
+}
+
+function formFromSavedModel(name: string, model: SavedModel): ModelFormState {
+  const params = model.params || {};
+  const apiKey = params.api_key;
+  let keySource: ModelFormState["openai_key_source"] = "omitted";
+  let keyEnv = "";
+  let keyLiteral = "";
+  if (typeof apiKey === "object" && apiKey && "env" in apiKey) {
+    keySource = "env";
+    keyEnv = String((apiKey as { env?: unknown }).env || "");
+  } else if (typeof apiKey === "string") {
+    keySource = "literal";
+    keyLiteral = apiKey;
+  }
+  return {
+    ...emptyModelForm,
+    name,
+    backend: model.backend === "dummy" ? "dummy" : "openai",
+    openai_model: formatValue(params.model || emptyModelForm.openai_model),
+    openai_provider_preset: inferProviderPreset(params),
+    openai_api_base: formatValue(params.api_base),
+    openai_key_source: keySource,
+    openai_api_key_env: keyEnv,
+    openai_api_key_literal: keyLiteral,
+    openai_temperature: formatValue(params.temperature ?? emptyModelForm.openai_temperature),
+    openai_max_tokens: formatValue(params.max_tokens ?? emptyModelForm.openai_max_tokens),
+    openai_top_p: formatValue(params.top_p ?? emptyModelForm.openai_top_p),
+    openai_frequency_penalty: formatValue(params.frequency_penalty ?? emptyModelForm.openai_frequency_penalty),
+    openai_presence_penalty: formatValue(params.presence_penalty ?? emptyModelForm.openai_presence_penalty),
+    dummy_response: formatValue(params.response || emptyModelForm.dummy_response)
+  };
+}
+
+function inferProviderPreset(params: Record<string, unknown>): ModelFormState["openai_provider_preset"] {
+  if (params.api_base === "https://openrouter.ai/api/v1") return "openrouter";
+  if (params.api_base === "http://localhost:11434/v1") return "ollama";
+  if (!params.api_base) return "openai";
+  return "custom";
+}
+
+function modelFormPayload(form: ModelFormState): Record<string, unknown> {
+  const payload: Record<string, unknown> = { ...form };
+  if (form.openai_provider_preset !== "custom") {
+    delete payload.openai_api_base;
+  }
+  return payload;
+}
 
 function clonePayload(payload: BuilderPayload): BuilderPayload {
   return JSON.parse(JSON.stringify(payload));
@@ -78,9 +203,11 @@ function useTemplateContext(payload: BuilderPayload) {
 
 function App() {
   const [configs, setConfigs] = useState<ConfigSummary[]>([]);
-  const [settingsModels, setSettingsModels] = useState<Record<string, { backend: string; params: Record<string, unknown> }>>({});
+  const [settingsModels, setSettingsModels] = useState<Record<string, SavedModel>>({});
+  const [settingsPath, setSettingsPath] = useState("");
   const [payload, setPayload] = useState<BuilderPayload>(() => clonePayload(emptyPayload));
   const [activeConfig, setActiveConfig] = useState<string>("");
+  const [activePage, setActivePage] = useState<Page>("configs");
   const [message, setMessage] = useState("");
   const [toml, setToml] = useState("");
   const [job, setJob] = useState<JobSnapshot | null>(null);
@@ -91,6 +218,7 @@ function App() {
     const [configData, settingsData] = await Promise.all([api.configs(), api.settings()]);
     setConfigs(configData.configs);
     setSettingsModels(settingsData.models);
+    setSettingsPath(settingsData.settings_path);
   }
 
   useEffect(() => {
@@ -128,6 +256,7 @@ function App() {
       const data = await api.config(name);
       setPayload(data.payload);
       setActiveConfig(name);
+      setActivePage("configs");
       setMessage(`Loaded ${name}`);
     } catch (error) {
       setMessage((error as Error).message);
@@ -193,9 +322,20 @@ function App() {
             <span>Local generator UI</span>
           </div>
         </div>
-        <button className="nav-action" onClick={() => { setPayload(clonePayload(emptyPayload)); setActiveConfig(""); setToml(""); }}>
+        <button className="nav-action" onClick={() => { setPayload(clonePayload(emptyPayload)); setActiveConfig(""); setToml(""); setActivePage("configs"); }}>
           <Plus size={18} /> New config
         </button>
+        <div className="config-list">
+          <span className="nav-label">Workspace</span>
+          <button className={activePage === "configs" ? "config active" : "config"} onClick={() => setActivePage("configs")}>
+            <span>Configs</span>
+            <small>Builder and runs</small>
+          </button>
+          <button className={activePage === "models" ? "config active" : "config"} onClick={() => setActivePage("models")}>
+            <span>Models</span>
+            <small>Reusable model library</small>
+          </button>
+        </div>
         <div className="config-list">
           <span className="nav-label">Configs</span>
           {configs.map((config) => (
@@ -210,21 +350,23 @@ function App() {
       <main className="workspace">
         <header className="topbar">
           <div>
-            <h1>{activeConfig || "New templated config"}</h1>
-            <p>{payload.description}</p>
+            <h1>{activePage === "models" ? "Models" : activeConfig || "New templated config"}</h1>
+            <p>{activePage === "models" ? "Reusable model definitions for dataset configs." : payload.description}</p>
           </div>
-          <div className="actions">
+          {activePage === "configs" ? <div className="actions">
             <button onClick={previewToml}><FileCheck size={18} /> Validate</button>
             <button onClick={saveConfig}><Save size={18} /> Save</button>
             <button onClick={startTrial}><Play size={18} /> Trial</button>
             <button className="primary" onClick={startFullRun}><Activity size={18} /> Full run</button>
-          </div>
+          </div> : null}
         </header>
 
         {message && <div className="status-line">{message}</div>}
         {busy && <div className="status-line"><Loader2 className="spin" size={16} /> Loading...</div>}
 
-        <div className="content-grid">
+        {activePage === "models" ? (
+          <ModelLibraryPage models={settingsModels} settingsPath={settingsPath} refresh={refresh} setMessage={setMessage} />
+        ) : <div className="content-grid">
           <section className="builder-panel">
             <Tabs.Root defaultValue="metadata" className="tabs">
               <Tabs.List className="tab-list">
@@ -234,7 +376,6 @@ function App() {
                 <Tabs.Trigger value="templates">Templates</Tabs.Trigger>
                 <Tabs.Trigger value="rules">Rules</Tabs.Trigger>
                 <Tabs.Trigger value="curator">Curator</Tabs.Trigger>
-                <Tabs.Trigger value="settings"><Settings size={16} /> Settings</Tabs.Trigger>
               </Tabs.List>
               <Tabs.Content value="metadata">
                 <MetadataPanel payload={payload} updatePayload={updatePayload} />
@@ -254,9 +395,6 @@ function App() {
               <Tabs.Content value="curator">
                 <CuratorPanel payload={payload} updatePayload={updatePayload} />
               </Tabs.Content>
-              <Tabs.Content value="settings">
-                <SettingsPanel models={settingsModels} refresh={refresh} />
-              </Tabs.Content>
             </Tabs.Root>
           </section>
 
@@ -268,7 +406,7 @@ function App() {
             }} />
             {toml && <pre className="toml-preview">{toml}</pre>}
           </aside>
-        </div>
+        </div>}
       </main>
     </div>
   );
@@ -358,45 +496,203 @@ function AliasEditor({ payload, source, updatePayload }: { payload: BuilderPaylo
   );
 }
 
-function ModelsPanel({ payload, settingsModels, updatePayload }: { payload: BuilderPayload; settingsModels: Record<string, { backend: string }>; updatePayload: (fn: (draft: BuilderPayload) => void) => void }) {
+function ModelsPanel({ payload, settingsModels, updatePayload }: { payload: BuilderPayload; settingsModels: Record<string, SavedModel>; updatePayload: (fn: (draft: BuilderPayload) => void) => void }) {
+  const [expandedSaved, setExpandedSaved] = useState<Record<string, boolean>>({});
+  const [customOpen, setCustomOpen] = useState(false);
+  const customModels = payload.models.map((model, index) => ({ model, index })).filter(({ model }) => model.kind !== "settings");
+
+  function selectSaved(name: string, checked: boolean) {
+    updatePayload((d) => {
+      d.models = d.models.filter((item) => !(item.kind === "settings" && item.name === name));
+      if (checked) {
+        d.models.push({ kind: "settings", name });
+        if (!d.default_model || !d.models.some((model) => model.name === d.default_model)) d.default_model = name;
+      }
+    });
+    if (checked) setExpandedSaved((current) => ({ ...current, [name]: true }));
+  }
+
   return (
     <div className="stack">
-      <div className="settings-model-grid">
+      <div className="model-picker">
         {Object.entries(settingsModels).map(([name, model]) => {
-          const checked = payload.models.some((item) => item.kind === "settings" && item.name === name);
+          const selected = payload.models.find((item) => item.kind === "settings" && item.name === name);
+          const checked = Boolean(selected);
+          const isExpanded = Boolean(expandedSaved[name]);
           return (
-            <label className="check-card" key={name}>
-              <input type="checkbox" checked={checked} onChange={(e) => updatePayload((d) => {
-                d.models = d.models.filter((item) => !(item.kind === "settings" && item.name === name));
-                if (e.target.checked) d.models.push({ kind: "settings", name });
-              })} />
-              <span>{name}</span>
-              <small>{model.backend}</small>
-            </label>
+            <article className={checked ? "model-row selected" : "model-row"} key={name}>
+              <label className="check-row">
+                <input type="checkbox" checked={checked} onChange={(e) => selectSaved(name, e.target.checked)} />
+                <strong>{name}</strong>
+              </label>
+              <small>{model.backend} · {modelSummary(model)}</small>
+              {checked && selected ? (
+                <>
+                  <button className="subtle-button" type="button" onClick={() => setExpandedSaved((current) => ({ ...current, [name]: !isExpanded }))}>
+                    {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                    {isExpanded ? "Hide effective fields" : "Edit overrides"}
+                  </button>
+                  {isExpanded ? (
+                    <ModelParamEditor
+                      backend={model.backend}
+                      params={effectiveSettingsParams(selected, model)}
+                      baseParams={model.params}
+                      onChange={(field, value) => updatePayload((d) => {
+                        const item = d.models.find((row) => row.kind === "settings" && row.name === name);
+                        if (!item) return;
+                        item.overrides = item.overrides || {};
+                        item.overrides.params = item.overrides.params || {};
+                        item.overrides.params[field] = value;
+                      })}
+                      onReset={(field) => updatePayload((d) => {
+                        const item = d.models.find((row) => row.kind === "settings" && row.name === name);
+                        if (!item?.overrides?.params) return;
+                        delete item.overrides.params[field];
+                        if (!Object.keys(item.overrides.params).length) delete item.overrides.params;
+                        if (item.overrides && !Object.keys(item.overrides).length) delete item.overrides;
+                      })}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </article>
           );
         })}
       </div>
-      {payload.models.filter((model) => model.kind !== "settings").map((model, index) => (
-        <article className="item-panel" key={index}>
+      {!Object.keys(settingsModels).length ? <p>No saved models yet. Add reusable models from the Models page or create a custom model below.</p> : null}
+      <details className="advanced-section" open={customOpen} onToggle={(event) => setCustomOpen(event.currentTarget.open)}>
+        <summary><SlidersHorizontal size={16} /> Advanced custom models</summary>
+        <div className="stack">
+          {customModels.map(({ model, index }) => (
+        <article className="item-panel" key={`${model.name}-${index}`}>
+          <div className="item-head">
+            <strong>{model.name || "Custom model"}</strong>
+            <IconButton title="Remove custom model" onClick={() => updatePayload((d) => { d.models.splice(index, 1); })}><Trash2 size={16} /></IconButton>
+          </div>
           <div className="form-grid compact">
             <Field label="Model name"><input value={model.name} onChange={(e) => updatePayload((d) => { d.models[index].name = e.target.value; })} /></Field>
             <Field label="Backend">
-              <select value={model.backend || "openai"} onChange={(e) => updatePayload((d) => { d.models[index].backend = e.target.value; })}>
+              <select value={model.backend || "openai"} onChange={(e) => updatePayload((d) => {
+                d.models[index].backend = e.target.value;
+                d.models[index].params = e.target.value === "dummy" ? { response: "ok" } : { model: "gpt-4.1-mini", temperature: 0.3, max_tokens: 1000 };
+              })}>
                 <option value="openai">openai</option>
                 <option value="dummy">dummy</option>
               </select>
             </Field>
           </div>
-          <Field label="Params JSON"><textarea className="code" value={typeof model.params === "string" ? model.params : JSON.stringify(model.params || {}, null, 2)} onChange={(e) => updatePayload((d) => { d.models[index].params = e.target.value; })} /></Field>
+          <ModelParamEditor
+            backend={model.backend || "openai"}
+            params={paramsOf(model)}
+            onChange={(field, value) => updatePayload((d) => {
+              const params = paramsOf(d.models[index]);
+              if (value === undefined) delete params[field];
+              else params[field] = value;
+              d.models[index].params = params;
+            })}
+          />
         </article>
-      ))}
+          ))}
+          <button onClick={() => updatePayload((d) => { d.models.push({ kind: "custom", name: `model_${d.models.length + 1}`, backend: "openai", params: { model: "gpt-4.1-mini", temperature: 0.3, max_tokens: 1000 } }); })}><Plus size={16} /> Add custom model</button>
+        </div>
+      </details>
       <Field label="Default model">
         <select value={payload.default_model} onChange={(e) => updatePayload((d) => { d.default_model = e.target.value; })}>
           {payload.models.map((model) => <option key={model.name} value={model.name}>{model.name}</option>)}
         </select>
       </Field>
-      <button onClick={() => updatePayload((d) => { d.models.push({ kind: "custom", name: `model_${d.models.length + 1}`, backend: "openai", params: { model: "gpt-4.1-mini", temperature: 0.3, max_tokens: 1000 } }); })}><Plus size={16} /> Add custom model</button>
     </div>
+  );
+}
+
+function ModelParamEditor({
+  backend,
+  params,
+  baseParams,
+  onChange,
+  onReset
+}: {
+  backend: string;
+  params: Record<string, unknown>;
+  baseParams?: Record<string, unknown>;
+  onChange: (field: string, value: unknown) => void;
+  onReset?: (field: string) => void;
+}) {
+  if (backend === "dummy") {
+    return (
+      <ParamField field="response" label="Dummy response" value={params.response} baseValue={baseParams?.response} onChange={onChange} onReset={onReset} />
+    );
+  }
+
+  const apiKey = params.api_key;
+  const keyEnv = typeof apiKey === "object" && apiKey && "env" in apiKey ? String((apiKey as { env?: unknown }).env || "") : "";
+  const keyLiteral = typeof apiKey === "string" ? apiKey : "";
+  const keyMode = keyEnv ? "env" : keyLiteral ? "literal" : "omitted";
+  return (
+    <div className="stack tight">
+      <div className="form-grid compact">
+        <ParamField field="model" label="Model" value={params.model} baseValue={baseParams?.model} onChange={onChange} onReset={onReset} />
+        <ParamField field="api_base" label="API base" value={params.api_base} baseValue={baseParams?.api_base} onChange={onChange} onReset={onReset} />
+        <Field label="API key source">
+          <select value={keyMode} onChange={(e) => {
+            if (e.target.value === "omitted") onChange("api_key", undefined);
+            if (e.target.value === "env") onChange("api_key", { env: keyEnv || "OPENAI_API_KEY" });
+            if (e.target.value === "literal") onChange("api_key", keyLiteral || "");
+          }}>
+            <option value="omitted">omitted</option>
+            <option value="env">env</option>
+            <option value="literal">literal</option>
+          </select>
+        </Field>
+        {keyMode === "env" ? (
+          <ParamField field="api_key_env" label="API key env" value={keyEnv} baseValue={typeof baseParams?.api_key === "object" && baseParams.api_key && "env" in baseParams.api_key ? String((baseParams.api_key as { env?: unknown }).env || "") : undefined} onChange={(field, value) => onChange("api_key", parseParamValue(field, String(value || "")))} onReset={onReset ? () => onReset("api_key") : undefined} />
+        ) : null}
+        {keyMode === "literal" ? (
+          <ParamField field="api_key" label="Literal API key" value={keyLiteral} baseValue={typeof baseParams?.api_key === "string" ? baseParams.api_key : undefined} onChange={onChange} onReset={onReset} />
+        ) : null}
+      </div>
+      <div className="form-grid compact">
+        <ParamField field="temperature" label="Temperature" type="number" step="0.1" value={params.temperature} baseValue={baseParams?.temperature} onChange={onChange} onReset={onReset} />
+        <ParamField field="max_tokens" label="Max tokens" type="number" value={params.max_tokens} baseValue={baseParams?.max_tokens} onChange={onChange} onReset={onReset} />
+        <ParamField field="top_p" label="Top P" type="number" step="0.05" value={params.top_p} baseValue={baseParams?.top_p} onChange={onChange} onReset={onReset} />
+        <ParamField field="frequency_penalty" label="Frequency penalty" type="number" step="0.1" value={params.frequency_penalty} baseValue={baseParams?.frequency_penalty} onChange={onChange} onReset={onReset} />
+        <ParamField field="presence_penalty" label="Presence penalty" type="number" step="0.1" value={params.presence_penalty} baseValue={baseParams?.presence_penalty} onChange={onChange} onReset={onReset} />
+      </div>
+    </div>
+  );
+}
+
+function ParamField({
+  field,
+  label,
+  value,
+  baseValue,
+  type = "text",
+  step,
+  onChange,
+  onReset
+}: {
+  field: string;
+  label: string;
+  value: unknown;
+  baseValue?: unknown;
+  type?: string;
+  step?: string;
+  onChange: (field: string, value: unknown) => void;
+  onReset?: (field: string) => void;
+}) {
+  const isOverride = baseValue !== undefined && JSON.stringify(value) !== JSON.stringify(baseValue);
+  return (
+    <label className={isOverride ? "field override-field" : "field"}>
+      <span>
+        {label}
+        {isOverride ? <em>override</em> : null}
+      </span>
+      <div className="field-with-reset">
+        <input type={type} step={step} value={formatValue(value)} onChange={(e) => onChange(field, parseParamValue(field, e.target.value))} />
+        {isOverride && onReset ? <IconButton title={`Reset ${label}`} onClick={() => onReset(field)}><RotateCcw size={15} /></IconButton> : null}
+      </div>
+    </label>
   );
 }
 
@@ -465,44 +761,230 @@ function CuratorPanel({ payload, updatePayload }: { payload: BuilderPayload; upd
   );
 }
 
-function SettingsPanel({ models, refresh }: { models: Record<string, { backend: string; params: Record<string, unknown> }>; refresh: () => Promise<void> }) {
-  const [form, setForm] = useState({ name: "", backend: "openai", openai_model: "gpt-4.1-mini", openai_provider_preset: "openai", dummy_response: "ok" });
+function ModelLibraryPage({
+  models,
+  settingsPath,
+  refresh,
+  setMessage
+}: {
+  models: Record<string, SavedModel>;
+  settingsPath: string;
+  refresh: () => Promise<void>;
+  setMessage: (message: string) => void;
+}) {
+  const [form, setForm] = useState<ModelFormState>(emptyModelForm);
+  const [deleteName, setDeleteName] = useState("");
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const modelEntries = Object.entries(models);
+  const editingExisting = Boolean(form.name && models[form.name]);
+
   async function save() {
     try {
       setError("");
-      await api.saveModel(form);
+      setSaving(true);
+      await api.saveModel(modelFormPayload(form));
+      await refresh();
+      setMessage(`Saved model ${form.name}`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteModel() {
+    if (!deleteName) return;
+    try {
+      setDeleting(true);
+      await api.deleteModel(deleteName);
+      setMessage(`Deleted model ${deleteName}`);
+      if (form.name === deleteName) setForm(emptyModelForm);
+      setDeleteName("");
       await refresh();
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setDeleting(false);
     }
   }
+
+  function updateForm(next: Partial<ModelFormState>) {
+    setForm((current) => ({ ...current, ...next }));
+  }
+
+  function resetForm() {
+    setError("");
+    setForm(emptyModelForm);
+  }
+
   return (
-    <div className="stack">
-      <div className="settings-model-grid">
-        {Object.entries(models).map(([name, model]) => (
-          <div className="check-card" key={name}>
-            <span>{name}</span>
-            <small>{model.backend}</small>
-            <IconButton title="Delete model" onClick={async () => { await api.deleteModel(name); await refresh(); }}><Trash2 size={16} /></IconButton>
+    <div className="model-page">
+      <section className="builder-panel model-library">
+        <div className="section-head">
+          <div>
+            <h2>Saved Models</h2>
+            <p className="path-text">{settingsPath || "Settings file will be created when you save a model."}</p>
           </div>
-        ))}
+          <button className="secondary-action" onClick={resetForm}><Plus size={16} /> New</button>
+        </div>
+        <div className="model-list">
+          {modelEntries.map(([name, model]) => {
+            const selected = form.name === name;
+            return (
+              <article className={selected ? "model-row selected" : "model-row"} key={name}>
+                <button className="model-select" type="button" onClick={() => setForm(formFromSavedModel(name, model))} aria-pressed={selected}>
+                  <span>
+                    <strong>{name}</strong>
+                    <small>{model.backend} · {modelSummary(model)}</small>
+                  </span>
+                </button>
+                <div className="model-row-actions">
+                  <button className="text-button" type="button" onClick={() => setForm(formFromSavedModel(name, model))}>
+                    <Pencil size={15} /> Edit
+                  </button>
+                  <IconButton title={`Delete ${name}`} onClick={() => setDeleteName(name)}><Trash2 size={16} /></IconButton>
+                </div>
+              </article>
+            );
+          })}
+          {!modelEntries.length ? (
+            <div className="empty-state">
+              <strong>No reusable models yet</strong>
+              <p>Create a saved model once, then include it in any dataset config.</p>
+              <button className="primary" type="button" onClick={resetForm}><Plus size={16} /> Create model</button>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="builder-panel model-form-panel">
+        <div className="section-head">
+          <div>
+            <h2>{editingExisting ? `Edit ${form.name}` : "Create Model"}</h2>
+            <p>Define the reusable base model. Dataset configs can select it and override individual parameters later.</p>
+          </div>
+        </div>
+        <div className="model-form">
+          <section className="form-section" aria-labelledby="model-identity-title">
+            <div className="form-section-heading">
+              <h3 id="model-identity-title">Model identity</h3>
+              <p>Name the reusable model and choose its runtime backend.</p>
+            </div>
+            <div className="form-grid model-basic-grid">
+              <Field label="Name"><input placeholder="local-gemma" value={form.name} onChange={(e) => updateForm({ name: e.target.value })} /></Field>
+              <Field label="Backend">
+                <select value={form.backend} onChange={(e) => updateForm({ backend: e.target.value as ModelFormState["backend"] })}>
+                  <option value="openai">openai</option>
+                  <option value="dummy">dummy</option>
+                </select>
+              </Field>
+            </div>
+          </section>
+
+          {form.backend === "openai" ? (
+            <>
+              <section className="form-section" aria-labelledby="provider-title">
+                <div className="form-section-heading">
+                  <h3 id="provider-title">Provider</h3>
+                  <p>Pick a preset for common OpenAI-compatible endpoints, or use a custom base URL.</p>
+                </div>
+                <div className="form-grid responsive-field-grid">
+                  <Field label="Provider preset">
+                    <select value={form.openai_provider_preset} onChange={(e) => {
+                      const preset = e.target.value as ModelFormState["openai_provider_preset"];
+                      if (preset === "openrouter") updateForm({ openai_provider_preset: preset, openai_api_base: "", openai_key_source: "env", openai_api_key_env: "OPENROUTER_API_KEY" });
+                      else if (preset === "ollama") updateForm({ openai_provider_preset: preset, openai_api_base: "", openai_key_source: "literal", openai_api_key_literal: "abc" });
+                      else updateForm({ openai_provider_preset: preset, openai_api_base: "", openai_key_source: "omitted" });
+                    }}>
+                      <option value="openai">OpenAI</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="ollama">Ollama/local</option>
+                      <option value="custom">Custom</option>
+                    </select>
+                  </Field>
+                  <Field label="Model"><input placeholder="gpt-4.1-mini" value={form.openai_model} onChange={(e) => updateForm({ openai_model: e.target.value })} /></Field>
+                  {form.openai_provider_preset === "custom" ? (
+                    <Field label="API base"><input placeholder="https://example.com/v1" value={form.openai_api_base} onChange={(e) => updateForm({ openai_api_base: e.target.value })} /></Field>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="form-section" aria-labelledby="credentials-title">
+                <div className="form-section-heading">
+                  <h3 id="credentials-title">Credentials</h3>
+                  <p>Store no key, reference an environment variable, or save a literal local value.</p>
+                </div>
+                <div className="form-grid responsive-field-grid">
+                  <Field label="API key source">
+                    <select value={form.openai_key_source} onChange={(e) => updateForm({ openai_key_source: e.target.value as ModelFormState["openai_key_source"] })}>
+                      <option value="omitted">omitted</option>
+                      <option value="env">env</option>
+                      <option value="literal">literal</option>
+                    </select>
+                  </Field>
+                  {form.openai_key_source === "env" ? (
+                    <Field label="API key env"><input placeholder="OPENAI_API_KEY" value={form.openai_api_key_env} onChange={(e) => updateForm({ openai_api_key_env: e.target.value })} /></Field>
+                  ) : null}
+                  {form.openai_key_source === "literal" ? (
+                    <Field label="Literal API key"><input placeholder="sk-..." value={form.openai_api_key_literal} onChange={(e) => updateForm({ openai_api_key_literal: e.target.value })} /></Field>
+                  ) : null}
+                </div>
+              </section>
+
+              <section className="form-section" aria-labelledby="sampling-title">
+                <div className="form-section-heading">
+                  <h3 id="sampling-title">Sampling</h3>
+                  <p>Defaults used by configs unless a config overrides a field.</p>
+                </div>
+                <div className="form-grid sampling-grid">
+                  <Field label="Temperature"><input type="number" step="0.1" value={form.openai_temperature} onChange={(e) => updateForm({ openai_temperature: e.target.value })} /></Field>
+                  <Field label="Max tokens"><input type="number" min={1} value={form.openai_max_tokens} onChange={(e) => updateForm({ openai_max_tokens: e.target.value })} /></Field>
+                  <Field label="Top P"><input type="number" step="0.05" value={form.openai_top_p} onChange={(e) => updateForm({ openai_top_p: e.target.value })} /></Field>
+                  <Field label="Frequency penalty"><input type="number" step="0.1" value={form.openai_frequency_penalty} onChange={(e) => updateForm({ openai_frequency_penalty: e.target.value })} /></Field>
+                  <Field label="Presence penalty"><input type="number" step="0.1" value={form.openai_presence_penalty} onChange={(e) => updateForm({ openai_presence_penalty: e.target.value })} /></Field>
+                </div>
+              </section>
+            </>
+          ) : (
+            <section className="form-section" aria-labelledby="dummy-title">
+              <div className="form-section-heading">
+                <h3 id="dummy-title">Dummy response</h3>
+                <p>Return this value for local smoke tests and UI validation.</p>
+              </div>
+              <Field label="Response"><input placeholder="ok" value={form.dummy_response} onChange={(e) => updateForm({ dummy_response: e.target.value })} /></Field>
+            </section>
+          )}
+
+          {error && <div className="form-alert" role="alert">{error}</div>}
+
+          <div className="form-footer">
+            <button className="secondary-action" type="button" onClick={resetForm} disabled={saving}>Reset form</button>
+            <button className="primary" onClick={save} disabled={saving}>
+              {saving ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+              {saving ? "Saving..." : "Save reusable model"}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {deleteName ? (
+        <div className="modal-backdrop">
+          <div className="modal">
+            <h2>Delete {deleteName}?</h2>
+            <p>Existing config TOML files keep their concrete model settings, but this reusable model will disappear from the library.</p>
+            <div className="inline-actions">
+              <button onClick={() => setDeleteName("")} disabled={deleting}>Cancel</button>
+              <button className="danger" onClick={deleteModel} disabled={deleting}>
+                {deleting ? <Loader2 className="spin" size={16} /> : <Trash2 size={16} />}
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       </div>
-      <div className="form-grid compact">
-        <Field label="Name"><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
-        <Field label="Backend"><select value={form.backend} onChange={(e) => setForm({ ...form, backend: e.target.value })}><option value="openai">openai</option><option value="dummy">dummy</option></select></Field>
-        {form.backend === "openai" ? (
-          <>
-            <Field label="Model"><input value={form.openai_model} onChange={(e) => setForm({ ...form, openai_model: e.target.value })} /></Field>
-            <Field label="Provider"><select value={form.openai_provider_preset} onChange={(e) => setForm({ ...form, openai_provider_preset: e.target.value })}><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="ollama">Ollama/local</option><option value="custom">Custom</option></select></Field>
-          </>
-        ) : (
-          <Field label="Dummy response"><input value={form.dummy_response} onChange={(e) => setForm({ ...form, dummy_response: e.target.value })} /></Field>
-        )}
-      </div>
-      {error && <div className="error-line">{error}</div>}
-      <button onClick={save}><Save size={16} /> Save reusable model</button>
-    </div>
   );
 }
 

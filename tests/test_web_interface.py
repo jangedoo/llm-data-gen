@@ -543,6 +543,148 @@ def test_guided_builder_creates_config_with_settings_model(monkeypatch, tmp_path
     assert "Updated in builder" in (config_dir / "built.toml").read_text()
 
 
+def test_builder_settings_model_overrides_are_written_to_toml(monkeypatch, tmp_path):
+    config_dir = tmp_path / "gen_configs"
+    config_dir.mkdir()
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    SettingsStore(settings_path).upsert_model(
+        name="configured-model",
+        fields={
+            "backend": "openai",
+            "openai_model": "gpt-4.1-mini",
+            "openai_temperature": "0.2",
+            "openai_max_tokens": "512",
+        },
+    )
+    monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
+
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    from fastapi.testclient import TestClient
+
+    test_client = TestClient(app)
+    payload = {
+        "dataset_name": "Override",
+        "description": "Override",
+        "authors": ["Tester"],
+        "generation_output_dir": "../raw_data/override",
+        "generation_logging_steps": 10,
+        "sources": [{"name": "source", "path": "dummy/source", "split": "train"}],
+        "models": [
+            {
+                "kind": "settings",
+                "name": "configured-model",
+                "overrides": {"params": {"temperature": 0.7, "top_p": 0.9}},
+            }
+        ],
+        "default_model": "configured-model",
+        "default_system_prompt": "System",
+        "default_prompt_template": "Question: {{ input.text }}",
+        "output_template": '{"text": "{{ input.text }}", "answer": "{{ llm_output }}"}',
+        "source_datasets": [{"name": "source", "max_records": 1, "shuffle": False}],
+        "aliases": [{"source": "source", "column_map": {"text": "body"}}],
+        "curator": {"upload_to_hf": False, "train_test_split": True, "update_card": True},
+    }
+
+    created = test_client.post(
+        "/api/configs",
+        json={"name": "override.toml", "payload": payload},
+    )
+
+    assert created.status_code == 200
+    config = config_utils.load_config_dict(config_dir / "override.toml")
+    params = config["models"]["configured-model"]["params"]
+    assert params["model"] == "gpt-4.1-mini"
+    assert params["temperature"] == 0.7
+    assert params["max_tokens"] == 512
+    assert params["top_p"] == 0.9
+
+
+def test_loaded_settings_model_reports_only_param_overrides(monkeypatch, tmp_path):
+    config_dir = tmp_path / "gen_configs"
+    config_dir.mkdir()
+    settings_path = tmp_path / ".datagen" / "settings.toml"
+    SettingsStore(settings_path).upsert_model(
+        name="configured-model",
+        fields={
+            "backend": "openai",
+            "openai_model": "gpt-4.1-mini",
+            "openai_temperature": "0.2",
+            "openai_max_tokens": "512",
+        },
+    )
+    (config_dir / "loaded.toml").write_text(
+        """
+dataset_name = "Loaded"
+description = "Loaded"
+authors = ["Tester"]
+generation_output_dir = "../raw_data/loaded"
+generation_logging_steps = 10
+
+[sources.source]
+path = "dummy/source"
+split = "train"
+
+[models.configured-model]
+backend = "openai"
+[models.configured-model.params]
+model = "gpt-4.1-mini"
+temperature = 0.6
+max_tokens = 512
+top_p = 0.8
+frequency_penalty = 0.0
+presence_penalty = 0.0
+
+[generator]
+generator = "templated"
+[generator.params]
+default_model = "configured-model"
+default_system_prompt = "System"
+default_prompt_template = "Question: {{ input.text }}"
+output_template = '{"text": "{{ input.text }}", "answer": "{{ llm_output }}"}'
+source_datasets = [{ name = "source", max_records = 1 }]
+
+[[generator.params.aliases]]
+source = "source"
+column_map = { text = "body" }
+
+[curator.params]
+upload_to_hf = false
+""".strip()
+    )
+    monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
+
+    app = create_app(project_root=tmp_path, settings_path=settings_path)
+    from fastapi.testclient import TestClient
+
+    loaded = TestClient(app).get("/api/configs/loaded.toml")
+
+    assert loaded.status_code == 200
+    model = loaded.json()["payload"]["models"][0]
+    assert model == {
+        "kind": "settings",
+        "name": "configured-model",
+        "overrides": {"params": {"temperature": 0.6, "top_p": 0.8}},
+    }
+
+
+def test_loaded_missing_settings_model_stays_custom(monkeypatch, tmp_path):
+    config_dir = tmp_path / "gen_configs"
+    config_dir.mkdir()
+    config_path, _ = write_config(config_dir, name="missing.toml")
+    monkeypatch.setattr(config_utils, "CONFIG_DIR", config_dir)
+    monkeypatch.setattr(builder, "CONFIG_DIR", config_dir)
+
+    app = create_app(project_root=tmp_path, settings_path=tmp_path / "settings.toml")
+    from fastapi.testclient import TestClient
+
+    loaded = TestClient(app).get(f"/api/configs/{config_path.name}")
+
+    assert loaded.status_code == 200
+    assert loaded.json()["payload"]["models"][0]["kind"] == "custom"
+
+
 def test_json_config_api_and_template_context(monkeypatch, tmp_path):
     config_dir = tmp_path / "gen_configs"
     config_dir.mkdir()
